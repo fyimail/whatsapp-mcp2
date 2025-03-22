@@ -31,6 +31,9 @@ COPY . .
 # Install dependencies
 RUN npm install
 
+# Install TypeScript globally for the build step
+RUN npm install -g typescript
+
 # Build app
 RUN npm run build
 
