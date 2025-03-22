@@ -1,31 +1,28 @@
-FROM node:22-bookworm-slim
+FROM node:16
 
-ENV DEBIAN_FRONTEND=noninteractive
+# Install Chrome
+RUN apt-get update && apt-get install -y \
+    chromium \
+    --no-install-recommends
 
-# for arm64 support we need to install chromium provided by debian
-# npm ERR! The chromium binary is not available for arm64.
-# https://github.com/puppeteer/puppeteer/issues/7740
-
+# Set Puppeteer to use Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-RUN apt-get update && \
-    apt-get install -y wget gnupg && \
-    apt-get install -y fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
-        libgtk2.0-0 libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2 && \
-    apt-get install -y chromium && \
-    apt-get clean
+WORKDIR /app
 
-WORKDIR /project
+# Copy application files
+COPY . .
 
-COPY package.json /project/package.json
+# Install dependencies
 RUN npm install
-COPY tsconfig.json /project/tsconfig.json
-COPY src/ /project/src
+
+# Build app
 RUN npm run build
 
+# Set up environment
+ENV NODE_ENV=production
 ENV DOCKER_CONTAINER=true
 
-ENTRYPOINT ["node", "dist/main.js"]
-
-# docker run -it --entr
+# Start command (using command transport)
+CMD ["node", "dist/main.js", "--mode", "mcp", "--auth-dir", "/var/data/whatsapp", "--auth-strategy", "local", "--transport", "command", "--api-key", "09d3e482988c47ae0daf3185c44faa20b5b9851412fc2fa54d910a689437f27b"]

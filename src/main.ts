@@ -48,7 +48,7 @@ function parseCommandLineArgs(): ReturnType<typeof yargs.parseSync> {
     .option('api-port', {
       description: 'Port for WhatsApp API server',
       type: 'number',
-      default: 3001,
+      default: 3002,
     })
     .option('auth-data-path', {
       alias: 'a',
@@ -62,12 +62,6 @@ function parseCommandLineArgs(): ReturnType<typeof yargs.parseSync> {
       type: 'string',
       choices: ['local', 'none'],
       default: 'local',
-    })
-    .option('api-base-url', {
-      alias: 'b',
-      description: 'Base URL for WhatsApp Web REST API when using api mode',
-      type: 'string',
-      default: 'http://localhost:3001/api',
     })
     .option('api-key', {
       alias: 'k',
@@ -108,7 +102,6 @@ function createConfigurations(argv: ReturnType<typeof parseCommandLineArgs>): {
 
   const mcpConfig: McpConfig = {
     useApiClient: argv['mcp-mode'] === 'api',
-    apiBaseUrl: argv['api-base-url'] as string,
     apiKey: argv['api-key'] as string,
     whatsappConfig: whatsAppConfig,
   };
@@ -138,7 +131,7 @@ async function startMcpSseServer(
 
   app.use(errorHandler);
 
-  app.listen(port, () => {
+  app.listen(port, '0.0.0.0', () => {
     logger.info(`MCP server is running on port ${port} in ${mode} mode`);
   });
 }
@@ -199,7 +192,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   });
   app.use('/api', routerFactory(client));
   app.use(errorHandler);
-  app.listen(port, () => {
+  app.listen(port, '0.0.0.0', () => {
     logger.info(`WhatsApp Web Client API started successfully on port ${port}`);
   });
 

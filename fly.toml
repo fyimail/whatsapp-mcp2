@@ -1,0 +1,47 @@
+# fly.toml app configuration file generated for whatsapp-integration on 2025-03-22T15:10:38+06:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'whatsapp-integration'
+primary_region = 'arn'
+kill_signal = 'SIGINT'
+kill_timeout = '5s'
+
+[experimental]
+  auto_rollback = true
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  DOCKER_CONTAINER = 'true'
+  NODE_ENV = 'production'
+
+[[mounts]]
+  source = 'whatsapp_auth'
+  destination = '/wwebjs_auth'
+
+[[services]]
+  protocol = 'tcp'
+  internal_port = 3002
+  processes = ['app']
+
+  [[services.ports]]
+    port = 80
+    handlers = ['http']
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ['tls', 'http']
+
+  [services.concurrency]
+    type = 'connections'
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
