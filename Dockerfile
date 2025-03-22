@@ -22,6 +22,9 @@ RUN mkdir -p /app/.wwebjs_auth && chmod -R 777 /app/.wwebjs_auth
 # Copy application files
 COPY . .
 
+# Fix permissions for the current user (pptruser)
+RUN chmod -R 777 /app
+
 # Install dependencies
 RUN npm install
 
