@@ -31,43 +31,22 @@ COPY . .
 # Install dependencies
 RUN npm install
 
-# Install TypeScript globally and required type definitions
+# Install TypeScript globally 
 RUN npm install -g typescript
-RUN npm install --save-dev @types/express @types/yargs @types/qrcode-terminal
-RUN npm install --save-dev @types/node
 
-# Create declaration modules for packages with missing types
-RUN mkdir -p /app/src/types && \
-    echo 'declare module "express";' > /app/src/types/express.d.ts && \
-    echo 'declare module "yargs";' > /app/src/types/yargs.d.ts && \
-    echo 'declare module "yargs/helpers";' > /app/src/types/yargs-helpers.d.ts && \
-    echo 'declare module "qrcode-terminal";' > /app/src/types/qrcode-terminal.d.ts
+# Install Babel for transpiling TypeScript without type checking
+RUN npm install --save-dev @babel/core @babel/cli @babel/preset-env @babel/preset-typescript
 
-# Create a custom simplified tsconfig for production that bypasses type checking
+# Create a minimal Babel config
 RUN echo '{ \
-  "compilerOptions": { \
-    "target": "es2018", \
-    "module": "commonjs", \
-    "esModuleInterop": true, \
-    "skipLibCheck": true, \
-    "outDir": "./dist", \
-    "strict": false, \
-    "noImplicitAny": false, \
-    "baseUrl": ".", \
-    "paths": { "*": ["node_modules/*", "src/types/*"] } \
-  }, \
-  "include": ["src/**/*"], \
-  "exclude": ["node_modules", "**/*.test.ts"] \
-}' > tsconfig.prod.json
+  "presets": [ \
+    ["@babel/preset-env", { "targets": { "node": "16" } }], \
+    ["@babel/preset-typescript", { "allowDeclareFields": true }] \
+  ] \
+}' > babel.config.json
 
-# Completely bypass TypeScript for production - just copy TS files to JS
-RUN find ./src -name "*.ts" | while read file; do \
-      dest_file="./dist/${file#./src/}" && \
-      mkdir -p "$(dirname "$dest_file")" && \
-      cp "$file" "${dest_file%.ts}.js"; \
-    done && \
-    find ./dist -type f -name "*.js" -exec sed -i 's/import.*from.*//g' {} \; && \
-    find ./dist -type f -name "*.js" -exec sed -i 's/export.*//g' {} \;
+# Transpile TypeScript to JavaScript using Babel (which strips type annotations)
+RUN npx babel src --extensions ".ts" --out-dir dist
 
 # Expose port 3000 (aligning with the memory about port 3000)
 EXPOSE 3000
