@@ -24,7 +24,14 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
   const docker_args = {
     headless: true,
     userDataDir: authDataPath,
-    args: ['--no-sandbox', '--single-process', '--no-zygote'],
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--single-process',
+      '--no-zygote',
+    ],
   };
 
   const authStrategy =
@@ -35,6 +42,12 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
       : new NoAuth();
 
   const puppeteer = config.dockerContainer ? docker_args : npx_args;
+
+  // Log puppeteer configuration
+  logger.debug('Puppeteer configuration:', config.dockerContainer ? docker_args : npx_args);
+  logger.info(
+    `Using Chrome executable: ${config.dockerContainer ? docker_args.executablePath : 'default'}`,
+  );
 
   const client = new Client({
     puppeteer,
