@@ -184,9 +184,13 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  // Get port from environment or use the provided port
+  const serverPort = process.env.PORT ? parseInt(process.env.PORT) : port;
+
   // Start the server immediately so Render can detect it
-  const server = app.listen(port, '0.0.0.0', () => {
-    logger.info(`WhatsApp Web Client API server started on port ${port}`);
+  // Important: Listen on 0.0.0.0 to bind to all network interfaces
+  const server = app.listen(serverPort, '0.0.0.0', () => {
+    logger.info(`WhatsApp Web Client API server started on port ${serverPort}`);
   });
 
   // Initialize WhatsApp client in the background
