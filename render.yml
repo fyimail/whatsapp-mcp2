@@ -3,7 +3,8 @@ services:
     name: whatsapp-integration
     env: docker
     buildCommand: docker build -t whatsapp-integration .
-    startCommand: docker run -p 3000:3000 whatsapp-integration
+    # Use Render's assigned port (10000)
+    startCommand: docker run -p 10000:10000 whatsapp-integration
     disk:
       name: whatsapp-data
       mountPath: /var/data/whatsapp

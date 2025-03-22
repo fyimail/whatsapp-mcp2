@@ -24,8 +24,11 @@ RUN npm run build
 ENV NODE_ENV=production
 ENV DOCKER_CONTAINER=true
 
-# Expose port for web service
-EXPOSE 3000
+# Create directory for auth data
+RUN mkdir -p /var/data/whatsapp && chmod -R 777 /var/data/whatsapp
 
-# Start command (using whatsapp-api mode with port 3000)
-CMD ["node", "dist/main.js", "--mode", "whatsapp-api", "--auth-dir", "/var/data/whatsapp", "--auth-strategy", "local", "--api-port", "3000", "--api-key", "09d3e482988c47ae0daf3185c44faa20b5b9851412fc2fa54d910a689437f27b"]
+# Expose port (let Render assign the port via environment)
+EXPOSE 10000
+
+# Start command (using whatsapp-api mode)
+CMD ["node", "dist/main.js", "--mode", "whatsapp-api", "--auth-dir", "/var/data/whatsapp", "--auth-strategy", "local", "--api-port", "0", "--api-key", "09d3e482988c47ae0daf3185c44faa20b5b9851412fc2fa54d910a689437f27b"]
