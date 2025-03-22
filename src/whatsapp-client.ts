@@ -13,6 +13,15 @@ export interface WhatsAppConfig {
 export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
   const authDataPath = config.authDataPath || '.wwebjs_auth';
 
+  logger.debug(
+    'Creating WhatsApp client with config:',
+    JSON.stringify({
+      authStrategy: config.authStrategy,
+      dockerContainer: config.dockerContainer,
+      authDataPath: authDataPath,
+    }),
+  );
+
   // remove Chrome lock file if it exists
   try {
     fs.rmSync(authDataPath + '/SingletonLock', { force: true });
@@ -20,6 +29,7 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
     // Ignore if file doesn't exist
   }
 
+  // Set up Puppeteer options for different environments
   const npx_args = { headless: true };
   const docker_args = {
     headless: true,
@@ -42,6 +52,12 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
     ],
   };
 
+  // Log puppeteer configuration
+  logger.debug('Puppeteer configuration:', config.dockerContainer ? docker_args : npx_args);
+  logger.info(
+    `Using Chrome executable: ${config.dockerContainer ? docker_args.executablePath : 'default'}`,
+  );
+
   const authStrategy =
     config.authStrategy === 'local' && !config.dockerContainer
       ? new LocalAuth({
@@ -49,13 +65,9 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
         })
       : new NoAuth();
 
-  const puppeteer = config.dockerContainer ? docker_args : npx_args;
+  logger.debug('Creating Client with auth strategy:', config.authStrategy);
 
-  // Log puppeteer configuration
-  logger.debug('Puppeteer configuration:', config.dockerContainer ? docker_args : npx_args);
-  logger.info(
-    `Using Chrome executable: ${config.dockerContainer ? docker_args.executablePath : 'default'}`,
-  );
+  const puppeteer = config.dockerContainer ? docker_args : npx_args;
 
   const client = new Client({
     puppeteer,
@@ -63,31 +75,43 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
     restartOnAuthFail: true,
   });
 
-  // Generate QR code when needed
+  logger.debug('Client created, setting up event handlers');
+
+  // Add more detailed initialization logging
   client.on('qr', (qr: string) => {
+    logger.debug('QR code event triggered');
     // Display QR code in terminal
     qrcode.generate(qr, { small: true }, qrcode => {
       logger.info(`QR code generated. Scan it with your phone to log in.\n${qrcode}`);
     });
+
+    // Also log the raw QR code for backup
+    logger.info(`Raw QR Code: ${qr}`);
   });
 
-  // Handle ready event
+  // Log initialization events with more detail
+  client.on('loading_screen', (percent, message) => {
+    logger.info(`Loading: ${percent}% - ${message}`);
+  });
+
+  // Add detailed logging for Puppeteer/browser events
+  client.on('change_state', state => {
+    logger.info(`Client state changed to: ${state}`);
+  });
+
   client.on('ready', async () => {
     logger.info('Client is ready!');
   });
 
-  // Handle authenticated event
   client.on('authenticated', () => {
     logger.info('Authentication successful!');
   });
 
-  // Handle auth failure event
-  client.on('auth_failure', (msg: string) => {
-    logger.error('Authentication failed:', msg);
+  client.on('auth_failure', error => {
+    logger.error('Authentication failed:', error);
   });
 
-  // Handle disconnected event
-  client.on('disconnected', (reason: string) => {
+  client.on('disconnected', reason => {
     logger.warn('Client was disconnected:', reason);
   });
 
@@ -96,6 +120,21 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
     const contact = await message.getContact();
     logger.debug(`${contact.pushname} (${contact.number}): ${message.body}`);
   });
+
+  // Add more debugging for initialization
+  const originalInitialize = client.initialize.bind(client);
+  client.initialize = async () => {
+    logger.debug('Starting client initialization...');
+    try {
+      logger.debug('Calling original initialize method');
+      const result = await originalInitialize();
+      logger.debug('Initialize method completed successfully');
+      return result;
+    } catch (error) {
+      logger.error('Error during initialization:', error);
+      throw error;
+    }
+  };
 
   return client;
 }
