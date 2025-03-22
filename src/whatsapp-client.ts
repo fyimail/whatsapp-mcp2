@@ -1,13 +1,90 @@
-import { Client, LocalAuth, Message, NoAuth } from 'whatsapp-web.js';
+import { Client, LocalAuth, Message, NoAuth, ClientOptions } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import logger from './logger';
 import fs from 'fs';
+import path from 'path';
 
 // Configuration interface
 export interface WhatsAppConfig {
   authDataPath?: string;
   authStrategy?: 'local' | 'none';
   dockerContainer?: boolean;
+}
+
+class EnhancedWhatsAppClient extends Client {
+  constructor(options: ClientOptions) {
+    super(options);
+    this.registerDebugEvents();
+  }
+
+  private registerDebugEvents() {
+    this.on('qr', (qr: string) => {
+      logger.info(`QR Code received: length=${qr.length} characters`);
+      // Could save QR code to file for web access if needed
+      const qrDir = '/var/data/whatsapp';
+      try {
+        fs.writeFileSync(path.join(qrDir, 'last-qr.txt'), qr);
+        logger.info(`QR code saved to ${path.join(qrDir, 'last-qr.txt')}`);
+      } catch (error) {
+        logger.error('Failed to save QR code:', error);
+      }
+      // Display QR code in terminal
+      qrcode.generate(qr, { small: true }, qrcode => {
+        logger.info(`QR code generated. Scan it with your phone to log in.\n${qrcode}`);
+      });
+
+      // Also log the raw QR code for backup
+      logger.info(`Raw QR Code: ${qr}`);
+    });
+
+    this.on('loading_screen', (percent, message) => {
+      logger.info(`Loading: ${percent}% - ${message}`);
+    });
+
+    this.on('change_state', state => {
+      logger.info(`Client state changed to: ${state}`);
+    });
+
+    this.on('ready', async () => {
+      logger.info('Client is ready!');
+    });
+
+    this.on('authenticated', () => {
+      logger.info('Authentication successful!');
+    });
+
+    this.on('auth_failure', error => {
+      logger.error('Authentication failed:', error);
+    });
+
+    this.on('disconnected', reason => {
+      logger.warn('Client was disconnected:', reason);
+    });
+
+    // Add error event handler
+    this.on('error', error => {
+      logger.error('Client error:', error);
+    });
+
+    // Handle incoming messages
+    this.on('message', async (message: Message) => {
+      const contact = await message.getContact();
+      logger.debug(`${contact.pushname} (${contact.number}): ${message.body}`);
+    });
+  }
+
+  async initialize() {
+    logger.info('Starting client initialization...');
+    try {
+      logger.info('Calling original initialize method');
+      const result = await super.initialize();
+      logger.info('Client initialization completed successfully');
+      return result;
+    } catch (error) {
+      logger.error('Error during client initialization:', error);
+      throw error;
+    }
+  }
 }
 
 export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
@@ -50,6 +127,7 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
       '--user-data-dir=/var/data/whatsapp/chrome-data',
       '--disable-web-security',
     ],
+    timeout: 120000, // 2 minute timeout
   };
 
   // Log puppeteer configuration
@@ -69,72 +147,27 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
 
   const puppeteer = config.dockerContainer ? docker_args : npx_args;
 
-  const client = new Client({
+  const clientOptions: ClientOptions = {
     puppeteer,
     authStrategy,
     restartOnAuthFail: true,
-  });
-
-  logger.debug('Client created, setting up event handlers');
-
-  // Add more detailed initialization logging
-  client.on('qr', (qr: string) => {
-    logger.debug('QR code event triggered');
-    // Display QR code in terminal
-    qrcode.generate(qr, { small: true }, qrcode => {
-      logger.info(`QR code generated. Scan it with your phone to log in.\n${qrcode}`);
-    });
-
-    // Also log the raw QR code for backup
-    logger.info(`Raw QR Code: ${qr}`);
-  });
-
-  // Log initialization events with more detail
-  client.on('loading_screen', (percent, message) => {
-    logger.info(`Loading: ${percent}% - ${message}`);
-  });
-
-  // Add detailed logging for Puppeteer/browser events
-  client.on('change_state', state => {
-    logger.info(`Client state changed to: ${state}`);
-  });
-
-  client.on('ready', async () => {
-    logger.info('Client is ready!');
-  });
-
-  client.on('authenticated', () => {
-    logger.info('Authentication successful!');
-  });
-
-  client.on('auth_failure', error => {
-    logger.error('Authentication failed:', error);
-  });
-
-  client.on('disconnected', reason => {
-    logger.warn('Client was disconnected:', reason);
-  });
-
-  // Handle incoming messages
-  client.on('message', async (message: Message) => {
-    const contact = await message.getContact();
-    logger.debug(`${contact.pushname} (${contact.number}): ${message.body}`);
-  });
-
-  // Add more debugging for initialization
-  const originalInitialize = client.initialize.bind(client);
-  client.initialize = async () => {
-    logger.debug('Starting client initialization...');
-    try {
-      logger.debug('Calling original initialize method');
-      const result = await originalInitialize();
-      logger.debug('Initialize method completed successfully');
-      return result;
-    } catch (error) {
-      logger.error('Error during initialization:', error);
-      throw error;
-    }
+    authTimeoutMs: 60000,
   };
 
-  return client;
+  if (config.authStrategy === 'local') {
+    clientOptions.authStrategy = new LocalAuth({
+      dataPath: authDataPath,
+    });
+    logger.info(`Using LocalAuth with data path: ${authDataPath}`);
+  }
+
+  // Add any custom options to client options
+  const customOptions = {
+    qrTimeoutMs: 60000,
+  };
+
+  // Merge options for the enhanced client
+  const enhancedOptions = { ...clientOptions, ...customOptions };
+
+  return new EnhancedWhatsAppClient(enhancedOptions);
 }

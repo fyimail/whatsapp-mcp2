@@ -24,5 +24,8 @@ RUN npm run build
 ENV NODE_ENV=production
 ENV DOCKER_CONTAINER=true
 
-# Start command (using command transport)
-CMD ["node", "dist/main.js", "--mode", "mcp", "--auth-dir", "/var/data/whatsapp", "--auth-strategy", "local", "--transport", "command", "--api-key", "09d3e482988c47ae0daf3185c44faa20b5b9851412fc2fa54d910a689437f27b"]
+# Expose port for web service
+EXPOSE 3000
+
+# Start command (using whatsapp-api mode with port 3000)
+CMD ["node", "dist/main.js", "--mode", "whatsapp-api", "--auth-dir", "/var/data/whatsapp", "--auth-strategy", "local", "--api-port", "3000", "--api-key", "09d3e482988c47ae0daf3185c44faa20b5b9851412fc2fa54d910a689437f27b"]

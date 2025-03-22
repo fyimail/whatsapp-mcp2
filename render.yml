@@ -1,9 +1,9 @@
 services:
-  - type: worker
+  - type: web
     name: whatsapp-integration
     env: docker
     buildCommand: docker build -t whatsapp-integration .
-    startCommand: docker run whatsapp-integration
+    startCommand: docker run -p 3000:3000 whatsapp-integration
     disk:
       name: whatsapp-data
       mountPath: /var/data/whatsapp
