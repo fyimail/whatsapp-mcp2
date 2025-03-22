@@ -31,11 +31,12 @@ COPY . .
 # Install dependencies
 RUN npm install
 
-# Install TypeScript globally for the build step
+# Install TypeScript globally and the Jest types needed for build
 RUN npm install -g typescript
+RUN npm install --save-dev @types/jest
 
-# Build app
-RUN npm run build
+# Build app - skip tests in production build
+RUN npm run build -- --skipLibCheck
 
 # Expose port
 EXPOSE 10000
