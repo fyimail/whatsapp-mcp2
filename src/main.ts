@@ -173,33 +173,91 @@ async function getWhatsAppApiKey(whatsAppConfig: WhatsAppConfig): Promise<string
 
 async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: number): Promise<void> {
   logger.info('Starting WhatsApp Web REST API...');
-  const client = createWhatsAppClient(whatsAppConfig);
-  await client.initialize();
 
-  const apiKey = await getWhatsAppApiKey(whatsAppConfig);
-  logger.info(`WhatsApp API key: ${apiKey}`);
-
+  // Create the Express app before initializing WhatsApp client
   const app = express();
   app.use(requestLogger);
   app.use(express.json());
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    const authHeader = req.headers['authorization'];
-    if (!authHeader || authHeader !== `Bearer ${apiKey}`) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
+
+  // Add health check endpoint that doesn't require authentication
+  app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Start the server immediately so Render can detect it
+  const server = app.listen(port, '0.0.0.0', () => {
+    logger.info(`WhatsApp Web Client API server started on port ${port}`);
+  });
+
+  // Initialize WhatsApp client in the background
+  let client: Client | null = null;
+  let clientReady = false;
+  let clientError: Error | null = null;
+
+  const initializeClient = async () => {
+    try {
+      logger.info('Starting WhatsApp client initialization...');
+      client = createWhatsAppClient(whatsAppConfig);
+
+      client.on('ready', () => {
+        clientReady = true;
+        logger.info('WhatsApp client is ready and fully operational');
+      });
+
+      await client.initialize();
+      logger.info('WhatsApp client initialization completed');
+
+      // Get API key after client is initialized
+      const apiKey = await getWhatsAppApiKey(whatsAppConfig);
+      logger.info(`WhatsApp API key: ${apiKey}`);
+
+      // Set up API routes
+      app.use((req: Request, res: Response, next: NextFunction) => {
+        const authHeader = req.headers['authorization'];
+        if (!authHeader || authHeader !== `Bearer ${apiKey}`) {
+          res.status(401).json({ error: 'Unauthorized' });
+          return;
+        }
+        next();
+      });
+
+      app.use('/api', routerFactory(client));
+
+      // Add status endpoint
+      app.get('/status', (req, res) => {
+        res.status(200).json({
+          status: clientReady ? 'ready' : 'initializing',
+          connected: !!client?.info,
+          timestamp: new Date().toISOString(),
+        });
+      });
+
+      app.use(errorHandler);
+    } catch (error) {
+      clientError = error as Error;
+      logger.error('Error during client initialization:', error);
+
+      // Add error status endpoint
+      app.get('/status', (req, res) => {
+        res.status(500).json({
+          status: 'error',
+          error: clientError?.message || 'Unknown error',
+          timestamp: new Date().toISOString(),
+        });
+      });
     }
-    next();
-  });
-  app.use('/api', routerFactory(client));
-  app.use(errorHandler);
-  app.listen(port, '0.0.0.0', () => {
-    logger.info(`WhatsApp Web Client API started successfully on port ${port}`);
-  });
+  };
+
+  // Start client initialization in the background
+  initializeClient();
 
   // Keep the process running
   process.on('SIGINT', async () => {
     logger.info('Shutting down WhatsApp Web Client API...');
-    await client.destroy();
+    if (client) {
+      await client.destroy();
+    }
+    server.close();
     process.exit(0);
   });
 }
