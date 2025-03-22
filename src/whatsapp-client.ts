@@ -29,8 +29,16 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--single-process',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--no-first-run',
       '--no-zygote',
+      '--single-process',
+      '--disable-extensions',
+      '--ignore-certificate-errors',
+      '--disable-storage-reset',
+      '--user-data-dir=/var/data/whatsapp/chrome-data',
+      '--disable-web-security',
     ],
   };
 
