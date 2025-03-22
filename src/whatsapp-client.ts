@@ -6,8 +6,8 @@ import path from 'path';
 
 // Configuration interface
 export interface WhatsAppConfig {
+  authStrategy?: string;
   authDataPath?: string;
-  authStrategy?: 'local' | 'none';
   dockerContainer?: boolean;
 }
 
@@ -90,27 +90,36 @@ class EnhancedWhatsAppClient extends Client {
 export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
   const authDataPath = config.authDataPath || '.wwebjs_auth';
 
-  logger.debug(
-    'Creating WhatsApp client with config:',
-    JSON.stringify({
-      authStrategy: config.authStrategy,
-      dockerContainer: config.dockerContainer,
-      authDataPath: authDataPath,
-    }),
-  );
+  // Set auth strategy with default to 'local'  
+  let authStrategy;
+  if (config.authStrategy === undefined || config.authStrategy === 'local') {
+    logger.info(`Using LocalAuth with data path: ${authDataPath}`);
+    authStrategy = new LocalAuth({
+      dataPath: authDataPath
+    });
+  } else {
+    logger.info('Using NoAuth strategy');
+    authStrategy = new NoAuth();
+  }
 
-  // remove Chrome lock file if it exists
+  // Log when auth file is saved
   try {
-    fs.rmSync(authDataPath + '/SingletonLock', { force: true });
-  } catch {
+    fs.mkdirSync(authDataPath, { recursive: true });
+    logger.info(`Auth directory created: ${authDataPath}`);
+  } catch (err) {
     // Ignore if file doesn't exist
   }
 
-  // Set up Puppeteer options for different environments
-  const npx_args = { headless: true };
-  const docker_args = {
+  // Log auth strategy
+  logger.info(`Using auth strategy: ${config.authStrategy || 'local'}`);
+  
+  // Set up puppeteer args for docker
+  const isLocalAuth = config.authStrategy === undefined || config.authStrategy === 'local';
+
+  // Configure Puppeteer options - Important: When using LocalAuth,
+  // DON'T set userDataDir in puppeteer options or --user-data-dir in args
+  const puppeteerOptions = {
     headless: true,
-    userDataDir: authDataPath,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
     args: [
       '--no-sandbox',
@@ -124,44 +133,24 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
       '--disable-extensions',
       '--ignore-certificate-errors',
       '--disable-storage-reset',
-      '--user-data-dir=/var/data/whatsapp/chrome-data',
       '--disable-web-security',
     ],
     timeout: 120000, // 2 minute timeout
   };
 
   // Log puppeteer configuration
-  logger.debug('Puppeteer configuration:', config.dockerContainer ? docker_args : npx_args);
-  logger.info(
-    `Using Chrome executable: ${config.dockerContainer ? docker_args.executablePath : 'default'}`,
-  );
+  logger.info(`Using Puppeteer executable path: ${puppeteerOptions.executablePath}`);
+  logger.debug('Puppeteer options:', puppeteerOptions);
 
-  const authStrategy =
-    config.authStrategy === 'local' && !config.dockerContainer
-      ? new LocalAuth({
-          dataPath: authDataPath,
-        })
-      : new NoAuth();
-
-  logger.debug('Creating Client with auth strategy:', config.authStrategy);
-
-  const puppeteer = config.dockerContainer ? docker_args : npx_args;
-
+  // Create client options
   const clientOptions: ClientOptions = {
-    puppeteer,
-    authStrategy,
+    puppeteer: puppeteerOptions,
+    authStrategy: authStrategy,
     restartOnAuthFail: true,
     authTimeoutMs: 60000,
   };
 
-  if (config.authStrategy === 'local') {
-    clientOptions.authStrategy = new LocalAuth({
-      dataPath: authDataPath,
-    });
-    logger.info(`Using LocalAuth with data path: ${authDataPath}`);
-  }
-
-  // Add any custom options to client options
+  // Create custom options with any non-standard parameters
   const customOptions = {
     qrTimeoutMs: 60000,
   };
@@ -169,5 +158,6 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
   // Merge options for the enhanced client
   const enhancedOptions = { ...clientOptions, ...customOptions };
 
+  logger.info('Creating enhanced WhatsApp client');
   return new EnhancedWhatsAppClient(enhancedOptions);
 }
