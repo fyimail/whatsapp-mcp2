@@ -131,7 +131,8 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
   // DON'T set userDataDir in puppeteer options or --user-data-dir in args
   const puppeteerOptions = {
     headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+    // Use the Chromium browser that comes with the Puppeteer Docker image
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
