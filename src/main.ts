@@ -95,7 +95,7 @@ function createConfigurations(argv: ReturnType<typeof parseCommandLineArgs>): {
   mcpConfig: McpConfig;
 } {
   const whatsAppConfig: WhatsAppConfig = {
-    authDataPath: argv['auth-data-path'] as string,
+    authDir: argv['auth-data-path'] as string,
     authStrategy: argv['auth-strategy'] as 'local' | 'none',
     dockerContainer: isDockerContainer,
   };
@@ -158,7 +158,7 @@ async function getWhatsAppApiKey(whatsAppConfig: WhatsAppConfig): Promise<string
   if (whatsAppConfig.authStrategy === 'none') {
     return crypto.randomBytes(32).toString('hex');
   }
-  const authDataPath = whatsAppConfig.authDataPath;
+  const authDataPath = whatsAppConfig.authDir;
   if (!authDataPath) {
     throw new Error('The auth-data-path is required when using whatsapp-api mode');
   }

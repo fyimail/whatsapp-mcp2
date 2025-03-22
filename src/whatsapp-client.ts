@@ -8,6 +8,7 @@ import path from 'path';
 export interface WhatsAppConfig {
   authStrategy?: string;
   authDir?: string;
+  dockerContainer?: boolean;
 }
 
 // Enhanced WhatsApp client with detailed logging
