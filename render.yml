@@ -4,7 +4,7 @@ services:
     env: docker
     buildCommand: docker build -t whatsapp-integration .
     # Use Render's assigned port (10000)
-    startCommand: docker run -p 10000:10000 whatsapp-integration
+    startCommand: docker run -p 10000:10000 -e DEBUG=puppeteer:*,whatsapp-web:* -e DBUS_SESSION_BUS_ADDRESS=/dev/null -e PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium -e NODE_ENV=production whatsapp-integration
     disk:
       name: whatsapp-data
       mountPath: /var/data/whatsapp

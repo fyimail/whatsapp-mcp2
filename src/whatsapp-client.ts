@@ -1,4 +1,4 @@
-import { Client, LocalAuth, Message, NoAuth, ClientOptions } from 'whatsapp-web.js';
+import { Client, LocalAuth, Message, NoAuth, ClientOptions, AuthStrategy } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import logger from './logger';
 import fs from 'fs';
@@ -7,34 +7,50 @@ import path from 'path';
 // Configuration interface
 export interface WhatsAppConfig {
   authStrategy?: string;
-  authDataPath?: string;
-  dockerContainer?: boolean;
+  authDir?: string;
 }
 
+// Enhanced WhatsApp client with detailed logging
 class EnhancedWhatsAppClient extends Client {
   constructor(options: ClientOptions) {
     super(options);
-    this.registerDebugEvents();
-  }
+    logger.info('Enhanced WhatsApp client created with options', {
+      authStrategy: options.authStrategy ? 'provided' : 'not provided',
+      puppeteerOptions: {
+        executablePath: options.puppeteer?.executablePath || 'default',
+        headless: options.puppeteer?.headless,
+        args: options.puppeteer?.args?.join(', ') || 'none',
+      },
+    });
 
-  private registerDebugEvents() {
-    this.on('qr', (qr: string) => {
-      logger.info(`QR Code received: length=${qr.length} characters`);
-      // Could save QR code to file for web access if needed
-      const qrDir = '/var/data/whatsapp';
+    // Add detailed event logging
+    this.on('qr', qr => {
+      logger.info('QR Code received', { length: qr.length });
+
+      // Save QR code to a file for easy access
       try {
-        fs.writeFileSync(path.join(qrDir, 'last-qr.txt'), qr);
-        logger.info(`QR code saved to ${path.join(qrDir, 'last-qr.txt')}`);
+        const qrPath = '/var/data/whatsapp/last-qr.txt';
+        fs.writeFileSync(qrPath, qr);
+        logger.info(`QR Code saved to ${qrPath}`);
       } catch (error) {
-        logger.error('Failed to save QR code:', error);
+        logger.error('Failed to save QR code to file', error);
       }
-      // Display QR code in terminal
-      qrcode.generate(qr, { small: true }, qrcode => {
-        logger.info(`QR code generated. Scan it with your phone to log in.\n${qrcode}`);
-      });
+    });
 
-      // Also log the raw QR code for backup
-      logger.info(`Raw QR Code: ${qr}`);
+    this.on('ready', () => {
+      logger.info('WhatsApp client is ready and fully operational');
+    });
+
+    this.on('authenticated', () => {
+      logger.info('WhatsApp client authenticated successfully');
+    });
+
+    this.on('auth_failure', msg => {
+      logger.error('Authentication failure', msg);
+    });
+
+    this.on('disconnected', reason => {
+      logger.warn('WhatsApp client disconnected', reason);
     });
 
     this.on('loading_screen', (percent, message) => {
@@ -45,23 +61,6 @@ class EnhancedWhatsAppClient extends Client {
       logger.info(`Client state changed to: ${state}`);
     });
 
-    this.on('ready', async () => {
-      logger.info('Client is ready!');
-    });
-
-    this.on('authenticated', () => {
-      logger.info('Authentication successful!');
-    });
-
-    this.on('auth_failure', error => {
-      logger.error('Authentication failed:', error);
-    });
-
-    this.on('disconnected', reason => {
-      logger.warn('Client was disconnected:', reason);
-    });
-
-    // Add error event handler
     this.on('error', error => {
       logger.error('Client error:', error);
     });
@@ -75,48 +74,60 @@ class EnhancedWhatsAppClient extends Client {
 
   async initialize() {
     logger.info('Starting client initialization...');
+
     try {
+      // Check Puppeteer data directory
+      const userDataDir = '/tmp/puppeteer_data';
+      if (!fs.existsSync(userDataDir)) {
+        logger.info(`Creating Puppeteer data directory: ${userDataDir}`);
+        fs.mkdirSync(userDataDir, { recursive: true });
+        fs.chmodSync(userDataDir, '777');
+      }
+
+      // Log environment variables
+      logger.info('Environment variables for Puppeteer', {
+        PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH,
+        DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+        NODE_ENV: process.env.NODE_ENV,
+      });
+
+      // Check if Chromium exists
+      try {
+        const { execSync } = require('child_process');
+        const chromiumVersion = execSync('chromium --version 2>&1').toString().trim();
+        logger.info(`Chromium version: ${chromiumVersion}`);
+      } catch (error) {
+        logger.error('Error checking Chromium version', error);
+      }
+
       logger.info('Calling original initialize method');
-      const result = await super.initialize();
-      logger.info('Client initialization completed successfully');
-      return result;
+      return super.initialize();
     } catch (error) {
-      logger.error('Error during client initialization:', error);
+      logger.error('Error during client initialization', error);
       throw error;
     }
   }
 }
 
 export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
-  const authDataPath = config.authDataPath || '.wwebjs_auth';
+  const authDataPath = path.join(config.authDir || '.', 'wwebjs_auth');
+  logger.info(`Using LocalAuth with data path: ${authDataPath}`);
 
-  // Set auth strategy with default to 'local'  
-  let authStrategy;
-  if (config.authStrategy === undefined || config.authStrategy === 'local') {
-    logger.info(`Using LocalAuth with data path: ${authDataPath}`);
-    authStrategy = new LocalAuth({
-      dataPath: authDataPath
-    });
+  // Ensure auth directory exists
+  if (!fs.existsSync(authDataPath)) {
+    logger.info(`Auth directory created: ${authDataPath}`);
+    fs.mkdirSync(authDataPath, { recursive: true });
+  }
+
+  let authStrategy: AuthStrategy | undefined = undefined;
+  if (typeof config.authStrategy === 'undefined' || config.authStrategy === 'local') {
+    logger.info(`Using auth strategy: local`);
+    authStrategy = new LocalAuth({ dataPath: authDataPath });
   } else {
     logger.info('Using NoAuth strategy');
     authStrategy = new NoAuth();
   }
 
-  // Log when auth file is saved
-  try {
-    fs.mkdirSync(authDataPath, { recursive: true });
-    logger.info(`Auth directory created: ${authDataPath}`);
-  } catch (err) {
-    // Ignore if file doesn't exist
-  }
-
-  // Log auth strategy
-  logger.info(`Using auth strategy: ${config.authStrategy || 'local'}`);
-  
-  // Set up puppeteer args for docker
-  const isLocalAuth = config.authStrategy === undefined || config.authStrategy === 'local';
-
-  // Configure Puppeteer options - Important: When using LocalAuth,
   // DON'T set userDataDir in puppeteer options or --user-data-dir in args
   const puppeteerOptions = {
     headless: true,
@@ -126,16 +137,23 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-accelerated-2d-canvas',
-      '--disable-gpu',
       '--no-first-run',
       '--no-zygote',
       '--single-process',
+      '--disable-gpu',
       '--disable-extensions',
       '--ignore-certificate-errors',
       '--disable-storage-reset',
-      '--disable-web-security',
+      '--disable-infobars',
+      '--window-size=1280,720',
+      '--remote-debugging-port=0',
+      '--user-data-dir=/tmp/puppeteer_data',
+      '--disable-features=AudioServiceOutOfProcess',
+      '--mute-audio',
+      '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
     ],
-    timeout: 120000, // 2 minute timeout
+    timeout: 0, // No timeout to allow for slower initialization
+    dumpio: true, // Output browser process stdout and stderr
   };
 
   // Log puppeteer configuration
@@ -147,12 +165,12 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
     puppeteer: puppeteerOptions,
     authStrategy: authStrategy,
     restartOnAuthFail: true,
-    authTimeoutMs: 60000,
+    authTimeoutMs: 120000, // Increase auth timeout to 2 minutes
   };
 
   // Create custom options with any non-standard parameters
   const customOptions = {
-    qrTimeoutMs: 60000,
+    qrTimeoutMs: 120000,
   };
 
   // Merge options for the enhanced client
