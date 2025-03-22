@@ -1,27 +1,29 @@
-FROM node:16-slim
+FROM node:16-alpine
 
 # Set environment variables
 ENV NODE_ENV=production
 ENV DOCKER_CONTAINER=true
-ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV DBUS_SESSION_BUS_ADDRESS=/dev/null
 ENV DEBUG=puppeteer:*,whatsapp-web:*
 
 WORKDIR /app
 
-# Create data directory structure
+# Create necessary directories
 RUN mkdir -p /app/data/whatsapp /app/.wwebjs_auth /tmp/puppeteer_data \
     && chmod -R 777 /app/data /app/.wwebjs_auth /tmp/puppeteer_data
 
-# Install Puppeteer dependencies (minimal set)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+# Install Chromium - Alpine has a much smaller package set with fewer dependencies
+RUN apk add --no-cache \
     chromium \
-    fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst \
-    && rm -rf /var/lib/apt/lists/*
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
 
-# Set Chrome path
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Tell Puppeteer to use the installed Chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 # Copy application files
 COPY . .
