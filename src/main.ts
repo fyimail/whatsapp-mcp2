@@ -180,7 +180,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   app.use(express.json());
 
   // Add health check endpoint that doesn't require authentication
-  app.get('/health', (req, res) => {
+  app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
@@ -224,7 +224,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       app.use('/api', routerFactory(client));
 
       // Add status endpoint
-      app.get('/status', (req, res) => {
+      app.get('/status', (_req, res) => {
         res.status(200).json({
           status: clientReady ? 'ready' : 'initializing',
           connected: !!client?.info,
@@ -238,7 +238,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       logger.error('Error during client initialization:', error);
 
       // Add error status endpoint
-      app.get('/status', (req, res) => {
+      app.get('/status', (_req, res) => {
         res.status(500).json({
           status: 'error',
           error: clientError?.message || 'Unknown error',
