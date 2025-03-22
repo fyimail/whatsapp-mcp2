@@ -31,12 +31,14 @@ COPY . .
 # Install dependencies
 RUN npm install
 
-# Install TypeScript globally and the Jest types needed for build
+# Install TypeScript globally
 RUN npm install -g typescript
-RUN npm install --save-dev @types/jest
 
-# Build app - skip tests in production build
-RUN npm run build -- --skipLibCheck
+# Create a production tsconfig that doesn't require Jest types
+RUN cat tsconfig.json | sed 's/"types": \["node", "jest"\]/"types": \["node"\]/' > tsconfig.prod.json
+
+# Build app with production config
+RUN tsc -p tsconfig.prod.json
 
 # Expose port
 EXPOSE 10000
