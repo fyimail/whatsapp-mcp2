@@ -242,8 +242,16 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
 
         // Also log QR code to console for terminal access
         try {
+          // Use a smaller QR code with proper formatting
+          logger.info('Scan this QR code with your WhatsApp app:');
           const qrcodeTerminal = require('qrcode-terminal');
-          qrcodeTerminal.generate(qr, { small: true });
+          qrcodeTerminal.generate(qr, { small: true }, function (qrcode) {
+            // Split the QR code by lines and log each line separately to preserve formatting
+            const qrLines = qrcode.split('\n');
+            qrLines.forEach((line: string) => {
+              logger.info(line);
+            });
+          });
         } catch (error) {
           logger.error('Failed to generate terminal QR code', error);
         }
