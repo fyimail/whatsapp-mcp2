@@ -31,22 +31,24 @@ COPY . .
 # Install dependencies
 RUN npm install
 
-# Install TypeScript globally 
-RUN npm install -g typescript
-
-# Install Babel for transpiling TypeScript without type checking
-RUN npm install --save-dev @babel/core @babel/cli @babel/preset-env @babel/preset-typescript
-
-# Create a minimal Babel config
-RUN echo '{ \
-  "presets": [ \
-    ["@babel/preset-env", { "targets": { "node": "16" } }], \
-    ["@babel/preset-typescript", { "allowDeclareFields": true }] \
-  ] \
-}' > babel.config.json
-
-# Transpile TypeScript to JavaScript using Babel (which strips type annotations)
-RUN npx babel src --extensions ".ts" --out-dir dist
+# A simpler approach - just copy files and strip TypeScript syntax with basic text replacement
+RUN mkdir -p dist && \
+    find src -name "*.ts" | while read file; do \
+    dest_dir="dist/$(dirname "$file" | sed 's|^src/||')"; \
+    mkdir -p "$dest_dir"; \
+    dest_file="$dest_dir/$(basename "$file" .ts).js"; \
+    # Strip TypeScript-specific syntax and convert to JavaScript \
+    cat "$file" | \
+    sed 's/: [^{=;)]*//g' | \
+    sed 's/export //g' | \
+    sed 's/import \(.*\) from \(.*\);/const \1 = require(\2);/g' | \
+    sed 's/interface \([^ ]*\) {/\/\/ interface \1 {/g' | \
+    sed 's/^\s*readonly //g' | \
+    sed 's/^\s*private //g' | \
+    sed 's/^\s*public //g' | \
+    sed 's/^\s*protected //g' \
+    > "$dest_file"; \
+    done
 
 # Expose port 3000 (aligning with the memory about port 3000)
 EXPOSE 3000
