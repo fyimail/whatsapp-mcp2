@@ -179,9 +179,41 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   app.use(requestLogger);
   app.use(express.json());
 
+  // Create a variable to store the QR code
+  let latestQrCode: string | null = null;
+
   // Add health check endpoint that doesn't require authentication
   app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Add QR code endpoint that doesn't require authentication
+  app.get('/qr', (_req, res) => {
+    if (latestQrCode) {
+      // First try to render as an image
+      try {
+        res.type('png');
+        const qrcodeLib = require('qrcode');
+        qrcodeLib.toBuffer(latestQrCode, (err: Error, buffer: Buffer) => {
+          if (err) {
+            // Fallback to returning the QR code as text
+            res.type('text/plain');
+            res.send(latestQrCode);
+          } else {
+            res.send(buffer);
+          }
+        });
+      } catch (error) {
+        // If qrcode package fails, return the raw QR code as text
+        res.type('text/plain');
+        res.send(latestQrCode);
+      }
+    } else {
+      res.status(404).json({
+        error: 'QR code not available yet',
+        message: 'WhatsApp client is still initializing or already authenticated',
+      });
+    }
   });
 
   // Get port from environment or use the provided port
@@ -203,8 +235,23 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       logger.info('Starting WhatsApp client initialization...');
       client = createWhatsAppClient(whatsAppConfig);
 
+      // Capture the QR code
+      client.on('qr', qr => {
+        logger.info('New QR code received');
+        latestQrCode = qr;
+
+        // Also log QR code to console for terminal access
+        try {
+          const qrcodeTerminal = require('qrcode-terminal');
+          qrcodeTerminal.generate(qr, { small: true });
+        } catch (error) {
+          logger.error('Failed to generate terminal QR code', error);
+        }
+      });
+
       client.on('ready', () => {
         clientReady = true;
+        latestQrCode = null; // Clear QR code when authenticated
         logger.info('WhatsApp client is ready and fully operational');
       });
 
