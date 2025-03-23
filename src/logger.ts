@@ -13,7 +13,7 @@ const levels = {
 // Define log level based on environment
 const level = (): string => {
   const env = process.env.NODE_ENV || 'development';
-  return env === 'development' ? 'debug' : 'info';
+  return env === 'production' ? 'info' : 'debug';
 };
 
 // Define colors for each level
@@ -35,11 +35,27 @@ const consoleFormat = winston.format.combine(
   winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`),
 );
 
+// Create a simple filter to reduce unnecessary logs
+const filterLogs = winston.format((info: winston.Logform.TransformableInfo) => {
+  // Filter out frequent or noisy logs
+  if (
+    typeof info.message === 'string' &&
+    (info.message.includes('puppeteer') ||
+      info.message.includes('browser') ||
+      info.message.includes('checking') ||
+      info.message.includes('polling'))
+  ) {
+    // Only allow these messages at debug level
+    return info.level === 'debug' ? info : false;
+  }
+  return info;
+})();
+
 // Create transports
 const transports: winston.transport[] = [
   // Console transport
   new winston.transports.Console({
-    format: consoleFormat,
+    format: winston.format.combine(filterLogs, consoleFormat),
     stderrLevels: ['error', 'warn'],
   }),
 ];
@@ -109,7 +125,7 @@ export function configureForCommandMode(): void {
   // Add new console transport that sends everything to stderr
   logger.add(
     new winston.transports.Console({
-      format: consoleFormat,
+      format: winston.format.combine(filterLogs, consoleFormat),
       stderrLevels: Object.keys(levels),
     }),
   );

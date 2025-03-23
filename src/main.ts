@@ -245,7 +245,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
           // Use a smaller QR code with proper formatting
           logger.info('Scan this QR code with your WhatsApp app:');
           const qrcodeTerminal = require('qrcode-terminal');
-          qrcodeTerminal.generate(qr, { small: true }, function (qrcode) {
+          qrcodeTerminal.generate(qr, { small: true }, function (qrcode: string) {
             // Split the QR code by lines and log each line separately to preserve formatting
             const qrLines = qrcode.split('\n');
             qrLines.forEach((line: string) => {

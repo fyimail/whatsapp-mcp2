@@ -20,7 +20,8 @@ class EnhancedWhatsAppClient extends Client {
       puppeteerOptions: {
         executablePath: options.puppeteer?.executablePath || 'default',
         headless: options.puppeteer?.headless,
-        args: options.puppeteer?.args?.join(', ') || 'none',
+        // Log only first few args to reduce verbosity
+        args: options.puppeteer?.args?.slice(0, 3).join(', ') + '...' || 'none',
       },
     });
 
@@ -40,6 +41,8 @@ class EnhancedWhatsAppClient extends Client {
 
     this.on('ready', () => {
       logger.info('WhatsApp client is ready and fully operational');
+      // Log a marker for minimal post-initialization logs
+      logger.info('--------- INITIALIZATION COMPLETE - REDUCING LOG VERBOSITY ---------');
     });
 
     this.on('authenticated', () => {
@@ -54,22 +57,55 @@ class EnhancedWhatsAppClient extends Client {
       logger.warn('WhatsApp client disconnected', reason);
     });
 
+    // Reduce loading screen log frequency
+    let lastLoggedPercent = 0;
     this.on('loading_screen', (percent, message) => {
-      logger.info(`Loading: ${percent}% - ${message}`);
+      // Convert percent to a number to ensure proper comparison
+      const percentNum = parseInt(percent.toString(), 10);
+      // Only log every 20% to reduce log spam
+      if (percentNum - lastLoggedPercent >= 20 || percentNum === 100) {
+        logger.info(`Loading: ${percentNum}% - ${message}`);
+        lastLoggedPercent = percentNum;
+      }
     });
 
+    // Only log significant state changes
     this.on('change_state', state => {
-      logger.info(`Client state changed to: ${state}`);
+      // Log only important state changes
+      if (['CONNECTED', 'DISCONNECTED', 'CONFLICT', 'UNLAUNCHED'].includes(state)) {
+        logger.info(`Client state changed to: ${state}`);
+      } else {
+        logger.debug(`Client state changed to: ${state}`);
+      }
     });
 
     this.on('error', error => {
       logger.error('Client error:', error);
     });
 
-    // Handle incoming messages
+    // Minimize message logging to debug level and only for new conversations
+    const recentChats = new Set<string>();
     this.on('message', async (message: Message) => {
-      const contact = await message.getContact();
-      logger.debug(`${contact.pushname} (${contact.number}): ${message.body}`);
+      try {
+        // Only log at debug level and only first message from each contact
+        if (process.env.NODE_ENV !== 'production') {
+          const chatId = message.from || '';
+          if (chatId && !recentChats.has(chatId)) {
+            const contact = await message.getContact();
+            logger.debug(`Message from ${contact.pushname || 'unknown'} (${contact.number})`);
+            // Add to recent chats and limit size to prevent memory growth
+            recentChats.add(chatId);
+            if (recentChats.size > 50) {
+              const firstItem = recentChats.values().next().value;
+              if (firstItem !== undefined) {
+                recentChats.delete(firstItem);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        // Silently ignore message logging errors
+      }
     });
   }
 
@@ -85,20 +121,22 @@ class EnhancedWhatsAppClient extends Client {
         fs.chmodSync(userDataDir, '777');
       }
 
-      // Log environment variables
-      logger.info('Environment variables for Puppeteer', {
+      // Log environment variables (at debug level to reduce production logs)
+      logger.debug('Environment variables for Puppeteer', {
         PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH,
         DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
         NODE_ENV: process.env.NODE_ENV,
       });
 
-      // Check if Chromium exists
-      try {
-        const { execSync } = require('child_process');
-        const chromiumVersion = execSync('chromium --version 2>&1').toString().trim();
-        logger.info(`Chromium version: ${chromiumVersion}`);
-      } catch (error) {
-        logger.error('Error checking Chromium version', error);
+      // Check if Chromium exists - only in dev environment
+      if (process.env.NODE_ENV !== 'production') {
+        try {
+          const { execSync } = require('child_process');
+          const chromiumVersion = execSync('chromium --version 2>&1').toString().trim();
+          logger.debug(`Chromium version: ${chromiumVersion}`);
+        } catch (error) {
+          logger.error('Error checking Chromium version', error);
+        }
       }
 
       logger.info('Calling original initialize method');
