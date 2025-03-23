@@ -34,11 +34,11 @@ RUN npm install
 # Copy the rest of the application files
 COPY . .
 
-# Install ts-node for direct TypeScript execution
+# Install ts-node for direct TypeScript execution without type checking
 RUN npm install -g ts-node typescript
 
 # Expose port 3000 for the web service
 EXPOSE 3000
 
-# Start command using ts-node to directly run TypeScript without compilation
-CMD ["npx", "ts-node", "src/main.ts", "--mode", "whatsapp-api", "--auth-dir", "/app/data/whatsapp", "--auth-strategy", "local", "--api-port", "3000", "--api-key", "09d3e482988c47ae0daf3185c44faa20b5b9851412fc2fa54d910a689437f27b"]
+# Start command using ts-node with --transpile-only to skip type checking
+CMD ["npx", "ts-node", "--transpile-only", "src/main.ts", "--mode", "whatsapp-api", "--auth-dir", "/app/data/whatsapp", "--auth-strategy", "local", "--api-port", "3000", "--api-key", "09d3e482988c47ae0daf3185c44faa20b5b9851412fc2fa54d910a689437f27b"]
