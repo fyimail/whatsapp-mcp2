@@ -323,6 +323,22 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
         logger.info('[WA] New QR code received');
         latestQrCode = qr;
         // QR code file saving is handled in whatsapp-client.ts
+
+        // Also log QR code to console for terminal access
+        try {
+          // Use a smaller QR code with proper formatting
+          logger.info('[WA] Scan this QR code with your WhatsApp app:');
+          const qrcodeTerminal = require('qrcode-terminal');
+          qrcodeTerminal.generate(qr, { small: true }, function (qrcode: string) {
+            // Split the QR code by lines and log each line separately to preserve formatting
+            const qrLines = qrcode.split('\n');
+            qrLines.forEach((line: string) => {
+              logger.info(`[WA-QR] ${line}`);
+            });
+          });
+        } catch (error) {
+          logger.error('[WA] Failed to generate terminal QR code', error);
+        }
       });
 
       client.on('ready', () => {

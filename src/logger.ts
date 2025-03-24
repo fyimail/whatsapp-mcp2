@@ -37,20 +37,43 @@ const consoleFormat = winston.format.combine(
 
 // Create a simple filter to reduce unnecessary logs
 const filterLogs = winston.format((info: winston.Logform.TransformableInfo) => {
-  // Filter out frequent or noisy logs
+  // Always keep QR code logs (they have the special [WA-QR] prefix)
+  if (typeof info.message === 'string' && info.message.includes('[WA-QR]')) {
+    return info;
+  }
+
+  // Filter out noisy puppeteer logs
   if (
     typeof info.message === 'string' &&
+    // Protocol messages
     (info.message.includes('puppeteer:protocol') ||
+      info.message.includes('SEND') ||
+      info.message.includes('RECV') ||
+      // Network and WebSocket traffic
       info.message.includes('Network.') ||
+      info.message.includes('webSocket') ||
+      // Session and protocol IDs
       info.message.includes('sessionId') ||
+      info.message.includes('targetId') ||
+      // General puppeteer noise
       info.message.includes('puppeteer') ||
       info.message.includes('browser') ||
       info.message.includes('checking') ||
-      info.message.includes('polling'))
+      info.message.includes('polling') ||
+      // Protocol payloads and results
+      info.message.includes('payloadData') ||
+      info.message.includes('result:{"result"') ||
+      // Runtime evaluations
+      info.message.includes('Runtime.') ||
+      info.message.includes('execute') ||
+      // Common patterns in the logs you showed
+      info.message.includes('method') ||
+      info.message.includes('params'))
   ) {
-    // Only allow these messages at debug level
-    return info.level === 'debug' ? info : false;
+    // Filter these out completely regardless of level, except for errors
+    return info.level === 'error' ? info : false;
   }
+
   return info;
 })();
 
