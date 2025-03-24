@@ -188,41 +188,62 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   });
 
   // Add QR code endpoint that doesn't require authentication
-  app.get('/qr', (_req, res) => {
-    if (latestQrCode) {
-      // First try to render as an image
-      try {
-        res.type('png');
-        const qrcodeLib = require('qrcode');
-        qrcodeLib.toBuffer(latestQrCode, (err: Error, buffer: Buffer) => {
-          if (err) {
-            // Fallback to returning the QR code as text
-            res.type('text/plain');
-            res.send(latestQrCode);
-          } else {
-            res.send(buffer);
-          }
-        });
-      } catch (error) {
-        // If qrcode package fails, return the raw QR code as text
-        res.type('text/plain');
-        res.send(latestQrCode);
+  app.get('/qr', (req, res) => {
+    try {
+      const qrPath = path.join('/var/data/whatsapp', 'last-qr.txt');
+      if (fs.existsSync(qrPath)) {
+        const qrCode = fs.readFileSync(qrPath, 'utf8');
+        res.send(`
+          <html>
+            <head>
+              <title>WhatsApp QR Code</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+                .qr-container { margin: 20px auto; }
+                pre { background: #f4f4f4; padding: 20px; display: inline-block; text-align: left; }
+              </style>
+            </head>
+            <body>
+              <h1>WhatsApp QR Code</h1>
+              <p>Scan this QR code with your WhatsApp app to link your device</p>
+              <div class="qr-container">
+                <pre>${qrCode}</pre>
+              </div>
+              <p><small>Last updated: ${new Date().toISOString()}</small></p>
+            </body>
+          </html>
+        `);
+      } else if (latestQrCode) {
+        // Fallback to latestQrCode if file doesn't exist
+        try {
+          res.type('png');
+          const qrcodeLib = require('qrcode');
+          qrcodeLib.toBuffer(latestQrCode, (err: Error, buffer: Buffer) => {
+            if (err) {
+              res.type('text/plain');
+              res.send(latestQrCode);
+            } else {
+              res.send(buffer);
+            }
+          });
+        } catch (error) {
+          res.type('text/plain');
+          res.send(latestQrCode);
+        }
+      } else {
+        res.status(404).send('QR code not found or not yet generated');
       }
-    } else {
-      res.status(404).json({
-        error: 'QR code not available yet',
-        message: 'WhatsApp client is still initializing or already authenticated',
-      });
+    } catch (error) {
+      logger.error('[WA] Error serving QR code', error);
+      res.status(500).send('Error reading QR code');
     }
   });
 
-  // Get port from environment or use the provided port
-  const serverPort = process.env.PORT ? parseInt(process.env.PORT) : port;
-
-  // Start the server immediately so Render can detect it
-  // Important: Listen on 0.0.0.0 to bind to all network interfaces
+  // Start server IMMEDIATELY - BEFORE client initialization
+  const serverPort = port || 3000;
   const server = app.listen(serverPort, '0.0.0.0', () => {
-    logger.info(`WhatsApp Web Client API server started on port ${serverPort}`);
+    logger.info(`[WA] WhatsApp Web Client API server started on port ${serverPort}`);
   });
 
   // Initialize WhatsApp client in the background

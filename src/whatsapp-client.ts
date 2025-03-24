@@ -15,7 +15,7 @@ export interface WhatsAppConfig {
 class EnhancedWhatsAppClient extends Client {
   constructor(options: ClientOptions) {
     super(options);
-    logger.info('Enhanced WhatsApp client created with options', {
+    logger.info('[WA] Enhanced WhatsApp client created with options', {
       authStrategy: options.authStrategy ? 'provided' : 'not provided',
       puppeteerOptions: {
         executablePath: options.puppeteer?.executablePath || 'default',
@@ -27,34 +27,51 @@ class EnhancedWhatsAppClient extends Client {
 
     // Add detailed event logging
     this.on('qr', qr => {
-      logger.info('QR Code received', { length: qr.length });
+      logger.info('[WA] QR Code received', { length: qr.length });
 
       // Save QR code to a file for easy access
       try {
-        const qrPath = '/var/data/whatsapp/last-qr.txt';
-        fs.writeFileSync(qrPath, qr);
-        logger.info(`QR Code saved to ${qrPath}`);
+        const qrDir = '/var/data/whatsapp';
+        const qrPath = `${qrDir}/last-qr.txt`;
+
+        // Ensure the directory exists
+        if (!fs.existsSync(qrDir)) {
+          fs.mkdirSync(qrDir, { recursive: true });
+          logger.info(`[WA] Created directory ${qrDir}`);
+        }
+
+        // Write the QR code to the file with explicit permissions
+        fs.writeFileSync(qrPath, qr, { mode: 0o666 });
+        logger.info(`[WA] QR Code saved to ${qrPath}`);
+
+        // Verify the file was written
+        if (fs.existsSync(qrPath)) {
+          const stats = fs.statSync(qrPath);
+          logger.info(`[WA] QR file created successfully: ${stats.size} bytes`);
+        } else {
+          logger.error(`[WA] QR file not found after write attempt!`);
+        }
       } catch (error) {
-        logger.error('Failed to save QR code to file', error);
+        logger.error('[WA] Failed to save QR code to file', error);
       }
     });
 
     this.on('ready', () => {
-      logger.info('WhatsApp client is ready and fully operational');
+      logger.info('[WA] WhatsApp client is ready and fully operational');
       // Log a marker for minimal post-initialization logs
-      logger.info('--------- INITIALIZATION COMPLETE - REDUCING LOG VERBOSITY ---------');
+      logger.info('[WA] --------- INITIALIZATION COMPLETE - REDUCING LOG VERBOSITY ---------');
     });
 
     this.on('authenticated', () => {
-      logger.info('WhatsApp client authenticated successfully');
+      logger.info('[WA] WhatsApp client authenticated successfully');
     });
 
     this.on('auth_failure', msg => {
-      logger.error('Authentication failure', msg);
+      logger.error('[WA] Authentication failure', msg);
     });
 
     this.on('disconnected', reason => {
-      logger.warn('WhatsApp client disconnected', reason);
+      logger.warn('[WA] WhatsApp client disconnected', reason);
     });
 
     // Reduce loading screen log frequency
@@ -64,7 +81,7 @@ class EnhancedWhatsAppClient extends Client {
       const percentNum = parseInt(percent.toString(), 10);
       // Only log every 20% to reduce log spam
       if (percentNum - lastLoggedPercent >= 20 || percentNum === 100) {
-        logger.info(`Loading: ${percentNum}% - ${message}`);
+        logger.info(`[WA] Loading: ${percentNum}% - ${message}`);
         lastLoggedPercent = percentNum;
       }
     });
@@ -73,14 +90,14 @@ class EnhancedWhatsAppClient extends Client {
     this.on('change_state', state => {
       // Log only important state changes
       if (['CONNECTED', 'DISCONNECTED', 'CONFLICT', 'UNLAUNCHED'].includes(state)) {
-        logger.info(`Client state changed to: ${state}`);
+        logger.info(`[WA] Client state changed to: ${state}`);
       } else {
-        logger.debug(`Client state changed to: ${state}`);
+        logger.debug(`[WA] Client state changed to: ${state}`);
       }
     });
 
     this.on('error', error => {
-      logger.error('Client error:', error);
+      logger.error('[WA] Client error:', error);
     });
 
     // Minimize message logging to debug level and only for new conversations
@@ -92,7 +109,7 @@ class EnhancedWhatsAppClient extends Client {
           const chatId = message.from || '';
           if (chatId && !recentChats.has(chatId)) {
             const contact = await message.getContact();
-            logger.debug(`Message from ${contact.pushname || 'unknown'} (${contact.number})`);
+            logger.debug(`[WA] Message from ${contact.pushname || 'unknown'} (${contact.number})`);
             // Add to recent chats and limit size to prevent memory growth
             recentChats.add(chatId);
             if (recentChats.size > 50) {
@@ -110,19 +127,19 @@ class EnhancedWhatsAppClient extends Client {
   }
 
   async initialize() {
-    logger.info('Starting client initialization...');
+    logger.info('[WA] Starting client initialization...');
 
     try {
       // Check Puppeteer data directory
       const userDataDir = '/tmp/puppeteer_data';
       if (!fs.existsSync(userDataDir)) {
-        logger.info(`Creating Puppeteer data directory: ${userDataDir}`);
+        logger.info(`[WA] Creating Puppeteer data directory: ${userDataDir}`);
         fs.mkdirSync(userDataDir, { recursive: true });
         fs.chmodSync(userDataDir, '777');
       }
 
       // Log environment variables (at debug level to reduce production logs)
-      logger.debug('Environment variables for Puppeteer', {
+      logger.debug('[WA] Environment variables for Puppeteer', {
         PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH,
         DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
         NODE_ENV: process.env.NODE_ENV,
@@ -133,16 +150,16 @@ class EnhancedWhatsAppClient extends Client {
         try {
           const { execSync } = require('child_process');
           const chromiumVersion = execSync('chromium --version 2>&1').toString().trim();
-          logger.debug(`Chromium version: ${chromiumVersion}`);
+          logger.debug(`[WA] Chromium version: ${chromiumVersion}`);
         } catch (error) {
-          logger.error('Error checking Chromium version', error);
+          logger.error('[WA] Error checking Chromium version', error);
         }
       }
 
-      logger.info('Calling original initialize method');
+      logger.info('[WA] Calling original initialize method');
       return super.initialize();
     } catch (error) {
-      logger.error('Error during client initialization', error);
+      logger.error('[WA] Error during client initialization', error);
       throw error;
     }
   }
@@ -150,20 +167,20 @@ class EnhancedWhatsAppClient extends Client {
 
 export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
   const authDataPath = path.join(config.authDir || '.', 'wwebjs_auth');
-  logger.info(`Using LocalAuth with data path: ${authDataPath}`);
+  logger.info(`[WA] Using LocalAuth with data path: ${authDataPath}`);
 
   // Ensure auth directory exists
   if (!fs.existsSync(authDataPath)) {
-    logger.info(`Auth directory created: ${authDataPath}`);
+    logger.info(`[WA] Auth directory created: ${authDataPath}`);
     fs.mkdirSync(authDataPath, { recursive: true });
   }
 
   let authStrategy: AuthStrategy | undefined = undefined;
   if (typeof config.authStrategy === 'undefined' || config.authStrategy === 'local') {
-    logger.info(`Using auth strategy: local`);
+    logger.info(`[WA] Using auth strategy: local`);
     authStrategy = new LocalAuth({ dataPath: authDataPath });
   } else {
-    logger.info('Using NoAuth strategy');
+    logger.info('[WA] Using NoAuth strategy');
     authStrategy = new NoAuth();
   }
 
@@ -197,8 +214,8 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
   };
 
   // Log puppeteer configuration
-  logger.info(`Using Puppeteer executable path: ${puppeteerOptions.executablePath}`);
-  logger.debug('Puppeteer options:', puppeteerOptions);
+  logger.info(`[WA] Using Puppeteer executable path: ${puppeteerOptions.executablePath}`);
+  logger.debug('[WA] Puppeteer options:', puppeteerOptions);
 
   // Create client options
   const clientOptions: ClientOptions = {
@@ -216,6 +233,6 @@ export function createWhatsAppClient(config: WhatsAppConfig = {}): Client {
   // Merge options for the enhanced client
   const enhancedOptions = { ...clientOptions, ...customOptions };
 
-  logger.info('Creating enhanced WhatsApp client');
+  logger.info('[WA] Creating enhanced WhatsApp client');
   return new EnhancedWhatsAppClient(enhancedOptions);
 }
