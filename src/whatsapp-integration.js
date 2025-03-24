@@ -7,6 +7,7 @@ let whatsappClient = null;
 let connectionStatus = 'disconnected';
 let qrCodeData = null;
 let initializationError = null;
+let apiKey = null; // Store API key after successful connection
 
 // Function to initialize WhatsApp client
 async function initializeWhatsAppClient() {
@@ -39,7 +40,10 @@ async function initializeWhatsAppClient() {
     });
 
     whatsappClient.on('ready', () => {
+      // Generate API key when client is ready
+      apiKey = generateApiKey();
       console.log('[WhatsApp] Client is ready');
+      console.log(`[WhatsApp] API Key: ${apiKey}`);
       connectionStatus = 'ready';
       qrCodeData = null;
     });
@@ -76,12 +80,22 @@ async function initializeWhatsAppClient() {
   }
 }
 
+// Generate a new API key
+function generateApiKey() {
+  return [...Array(64)]
+    .map(() => (Math.random() * 36 | 0).toString(36))
+    .join('')
+    .replace(/[^a-z0-9]/g, '')
+    .substring(0, 64);
+}
+
 // Export functions and state for the HTTP server to use
 module.exports = {
   initializeWhatsAppClient,
   getStatus: () => ({
     status: connectionStatus,
-    error: initializationError
+    error: initializationError,
+    apiKey: connectionStatus === 'ready' ? apiKey : null
   }),
   getQRCode: async () => {
     if (!qrCodeData) {

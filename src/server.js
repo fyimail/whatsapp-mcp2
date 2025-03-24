@@ -104,6 +104,88 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // API Key endpoint - simple way to get the current API key
+  if (url === '/api' || url === '/api/') {
+    const status = whatsapp.getStatus();
+    if (status.status === 'ready' && status.apiKey) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`
+        <html>
+          <head><title>WhatsApp API Key</title></head>
+          <body>
+            <h1>WhatsApp API Key</h1>
+            <p>Current status: <strong>${status.status}</strong></p>
+            <p>API Key: <code>${status.apiKey}</code></p>
+            <p>MCP command:</p>
+            <pre>wweb-mcp -m mcp -s local -c api -t command --api-base-url https://whatsapp-integration-u4q0.onrender.com/api --api-key ${status.apiKey}</pre>
+          </body>
+        </html>
+      `);
+    } else {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`
+        <html>
+          <head><title>WhatsApp API Key</title></head>
+          <body>
+            <h1>WhatsApp API Key</h1>
+            <p>Current status: <strong>${status.status}</strong></p>
+            <p>API Key not available yet. WhatsApp must be in 'ready' state first.</p>
+            <p><a href="/api">Refresh</a> | <a href="/status">Check Status</a> | <a href="/qr">Scan QR Code</a></p>
+          </body>
+        </html>
+      `);
+    }
+    return;
+  }
+
+  // MCP Tool specific endpoint - status check with API key
+  if (url === '/api/status' || url.startsWith('/api/status?')) {
+    const status = whatsapp.getStatus();
+    const clientApiKey = status.apiKey;
+    
+    // Only validate API key if client is ready and has an API key
+    if (status.status === 'ready' && clientApiKey) {
+      // Extract API key from request (if any)
+      const urlParams = new URL('http://dummy.com' + req.url).searchParams;
+      const requestApiKey = urlParams.get('api_key') || urlParams.get('apiKey');
+      const headerApiKey = req.headers['x-api-key'] || req.headers['authorization'];
+      const providedApiKey = requestApiKey || (headerApiKey && headerApiKey.replace('Bearer ', ''));
+      
+      // Validate API key if provided
+      if (providedApiKey && providedApiKey !== clientApiKey) {
+        console.log(`[${new Date().toISOString()}] Invalid API key for /api/status endpoint`);
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid API key' }));
+        return;
+      }
+    }
+    
+    console.log(`[${new Date().toISOString()}] MCP status check: ${status.status}`);
+    res.writeHead(200, { 
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      success: true,
+      connected: status.status === 'ready',
+      status: status.status,
+      error: status.error,
+      timestamp: new Date().toISOString()
+    }));
+    return;
+  }
+  
+  // Support OPTIONS requests for CORS
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key'
+    });
+    res.end();
+    return;
+  }
+
   // 404 for everything else
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not Found');
