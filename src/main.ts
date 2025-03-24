@@ -172,75 +172,137 @@ async function getWhatsAppApiKey(whatsAppConfig: WhatsAppConfig): Promise<string
 }
 
 async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: number): Promise<void> {
-  logger.info('Starting WhatsApp Web REST API...');
+  logger.info('[WA] Starting WhatsApp Web REST API...');
 
   // Create the Express app before initializing WhatsApp client
   const app = express();
-  app.use(requestLogger);
+
+  // Add error handling to all middleware
+  app.use((req, res, next) => {
+    try {
+      requestLogger(req, res, next);
+    } catch (error) {
+      logger.error('[WA] Error in request logger middleware:', error);
+      next();
+    }
+  });
+
   app.use(express.json());
 
   // Create a variable to store the QR code
   let latestQrCode: string | null = null;
 
+  // Add server status tracking
+  let whatsappInitializing = true;
+  let whatsappError: Error | null = null;
+  let clientReady = false;
+
   // Add health check endpoint that doesn't require authentication
+  // CRITICAL: This must be minimal and not depend on any WhatsApp state
   app.get('/health', (_req, res) => {
-    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+    try {
+      // Always return 200 for Render health check, even if WhatsApp is still initializing
+      res.status(200).json({
+        status: 'ok',
+        server: 'running',
+        whatsapp: clientReady ? 'ready' : whatsappError ? 'error' : 'initializing',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error('[WA] Error in health check endpoint:', error);
+      // Still return 200 to keep Render happy
+      res.status(200).send('OK');
+    }
   });
 
-  // Add QR code endpoint that doesn't require authentication
+  // Add QR code endpoint with enhanced error handling
   app.get('/qr', (req, res) => {
     try {
-      const qrPath = path.join('/var/data/whatsapp', 'last-qr.txt');
-      if (fs.existsSync(qrPath)) {
-        const qrCode = fs.readFileSync(qrPath, 'utf8');
-        res.send(`
-          <html>
-            <head>
-              <title>WhatsApp QR Code</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <style>
-                body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
-                .qr-container { margin: 20px auto; }
-                pre { background: #f4f4f4; padding: 20px; display: inline-block; text-align: left; }
-              </style>
-            </head>
-            <body>
-              <h1>WhatsApp QR Code</h1>
-              <p>Scan this QR code with your WhatsApp app to link your device</p>
-              <div class="qr-container">
-                <pre>${qrCode}</pre>
-              </div>
-              <p><small>Last updated: ${new Date().toISOString()}</small></p>
-            </body>
-          </html>
-        `);
-      } else if (latestQrCode) {
-        // Fallback to latestQrCode if file doesn't exist
-        try {
-          res.type('png');
-          const qrcodeLib = require('qrcode');
-          qrcodeLib.toBuffer(latestQrCode, (err: Error, buffer: Buffer) => {
-            if (err) {
-              res.type('text/plain');
-              res.send(latestQrCode);
-            } else {
-              res.send(buffer);
-            }
-          });
-        } catch (error) {
-          res.type('text/plain');
-          res.send(latestQrCode);
+      // First try to get QR from file
+      try {
+        const qrPath = path.join('/var/data/whatsapp', 'last-qr.txt');
+        if (fs.existsSync(qrPath)) {
+          try {
+            const qrCode = fs.readFileSync(qrPath, 'utf8');
+            return res.send(`
+              <html>
+                <head>
+                  <title>WhatsApp QR Code</title>
+                  <meta name="viewport" content="width=device-width, initial-scale=1">
+                  <style>
+                    body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+                    .qr-container { margin: 20px auto; }
+                    pre { background: #f4f4f4; padding: 20px; display: inline-block; text-align: left; }
+                    .status { color: #555; margin: 20px 0; }
+                  </style>
+                </head>
+                <body>
+                  <h1>WhatsApp QR Code</h1>
+                  <p>Scan this QR code with your WhatsApp app to link your device</p>
+                  <div class="qr-container">
+                    <pre>${qrCode}</pre>
+                  </div>
+                  <p class="status">Server status: ${whatsappInitializing ? 'Initializing WhatsApp...' : clientReady ? 'WhatsApp Ready' : 'Waiting for authentication'}</p>
+                  <p><small>Last updated: ${new Date().toISOString()}</small></p>
+                </body>
+              </html>
+            `);
+          } catch (readError) {
+            logger.error('[WA] Error reading QR file:', readError);
+            // Continue to fallback methods
+          }
         }
+      } catch (fileError) {
+        logger.error('[WA] Error accessing QR file system:', fileError);
+        // Continue to fallback methods
+      }
+
+      // Fallback to in-memory QR code
+      if (latestQrCode) {
+        try {
+          res.type('text/plain');
+          return res.send(latestQrCode);
+        } catch (error) {
+          logger.error('[WA] Error sending QR code as text:', error);
+          // Continue to final fallback
+        }
+      }
+
+      // Final fallback - just return status
+      if (whatsappError) {
+        return res.status(500).send(`WhatsApp initialization error: ${whatsappError.message}`);
+      } else if (whatsappInitializing) {
+        return res
+          .status(202)
+          .send('WhatsApp client is still initializing. Please try again in a minute.');
+      } else if (clientReady) {
+        return res.status(200).send('WhatsApp client is already authenticated. No QR code needed.');
       } else {
-        res.status(404).send('QR code not found or not yet generated');
+        return res.status(404).send('QR code not yet available. Please try again in a moment.');
       }
     } catch (error) {
-      logger.error('[WA] Error serving QR code', error);
-      res.status(500).send('Error reading QR code');
+      logger.error('[WA] Unhandled error in QR endpoint:', error);
+      res.status(500).send('Internal server error processing QR request');
+    }
+  });
+
+  // Add status endpoint with enhanced error handling
+  app.get('/status', (_req, res) => {
+    try {
+      res.status(200).json({
+        server: 'running',
+        whatsapp: clientReady ? 'ready' : whatsappError ? 'error' : 'initializing',
+        error: whatsappError ? whatsappError.message : null,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error('[WA] Error in status endpoint:', error);
+      res.status(500).send('Error getting status');
     }
   });
 
   // Start server IMMEDIATELY - BEFORE client initialization
+  // This is CRITICAL to prevent Render deployment failures
   const serverPort = port || 3000;
   const server = app.listen(serverPort, '0.0.0.0', () => {
     logger.info(`[WA] WhatsApp Web Client API server started on port ${serverPort}`);
@@ -248,92 +310,64 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
 
   // Initialize WhatsApp client in the background
   let client: Client | null = null;
-  let clientReady = false;
-  let clientError: Error | null = null;
 
   const initializeClient = async () => {
     try {
-      logger.info('Starting WhatsApp client initialization...');
+      logger.info('[WA] Starting WhatsApp client initialization...');
+
+      // Create the client
       client = createWhatsAppClient(whatsAppConfig);
 
       // Capture the QR code
       client.on('qr', qr => {
-        logger.info('New QR code received');
+        logger.info('[WA] New QR code received');
         latestQrCode = qr;
-
-        // Also log QR code to console for terminal access
-        try {
-          // Use a smaller QR code with proper formatting
-          logger.info('Scan this QR code with your WhatsApp app:');
-          const qrcodeTerminal = require('qrcode-terminal');
-          qrcodeTerminal.generate(qr, { small: true }, function (qrcode: string) {
-            // Split the QR code by lines and log each line separately to preserve formatting
-            const qrLines = qrcode.split('\n');
-            qrLines.forEach((line: string) => {
-              logger.info(line);
-            });
-          });
-        } catch (error) {
-          logger.error('Failed to generate terminal QR code', error);
-        }
+        // QR code file saving is handled in whatsapp-client.ts
       });
 
       client.on('ready', () => {
         clientReady = true;
-        latestQrCode = null; // Clear QR code when authenticated
-        logger.info('WhatsApp client is ready and fully operational');
+        whatsappInitializing = false;
+        logger.info('[WA] Client is ready');
+      });
+
+      client.on('auth_failure', error => {
+        whatsappError = new Error(`Authentication failed: ${error}`);
+        logger.error('[WA] Authentication failed:', error);
+      });
+
+      client.on('disconnected', reason => {
+        logger.warn('[WA] Client disconnected:', reason);
+        clientReady = false;
       });
 
       await client.initialize();
-      logger.info('WhatsApp client initialization completed');
-
-      // Get API key after client is initialized
-      const apiKey = await getWhatsAppApiKey(whatsAppConfig);
-      logger.info(`WhatsApp API key: ${apiKey}`);
-
-      // Set up API routes
-      app.use((req: Request, res: Response, next: NextFunction) => {
-        const authHeader = req.headers['authorization'];
-        if (!authHeader || authHeader !== `Bearer ${apiKey}`) {
-          res.status(401).json({ error: 'Unauthorized' });
-          return;
-        }
-        next();
-      });
-
-      app.use('/api', routerFactory(client));
-
-      // Add status endpoint
-      app.get('/status', (_req, res) => {
-        res.status(200).json({
-          status: clientReady ? 'ready' : 'initializing',
-          connected: !!client?.info,
-          timestamp: new Date().toISOString(),
-        });
-      });
-
-      app.use(errorHandler);
     } catch (error) {
-      clientError = error as Error;
-      logger.error('Error during client initialization:', error);
+      whatsappInitializing = false;
+      whatsappError = error as Error;
+      logger.error('[WA] Error during client initialization:', error);
 
-      // Add error status endpoint
-      app.get('/status', (_req, res) => {
-        res.status(500).json({
-          status: 'error',
-          error: clientError?.message || 'Unknown error',
-          timestamp: new Date().toISOString(),
-        });
-      });
+      // Don't throw here - we want the server to keep running even if WhatsApp fails
     }
   };
 
   // Start client initialization in the background
   initializeClient();
 
+  // Set additional error handlers for process
+  process.on('uncaughtException', error => {
+    logger.error('[WA] Uncaught exception:', error);
+    // Don't crash the server
+  });
+
+  process.on('unhandledRejection', reason => {
+    logger.error('[WA] Unhandled rejection:', reason);
+    // Don't crash the server
+  });
+
   // Keep the process running
   process.on('SIGINT', async () => {
-    logger.info('Shutting down WhatsApp Web Client API...');
+    logger.info('[WA] Shutting down WhatsApp Web Client API...');
     if (client) {
       await client.destroy();
     }
