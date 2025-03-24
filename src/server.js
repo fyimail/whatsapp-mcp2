@@ -12,8 +12,8 @@ const server = http.createServer((req, res) => {
   const url = req.url;
   console.log(`[${new Date().toISOString()}] ${req.method} ${url}`);
 
-  // Health check endpoint
-  if (url === '/health') {
+  // Health check endpoint - handle both with and without trailing space
+  if (url === '/health' || url === '/health ' || url === '/health%20') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }));
     return;
