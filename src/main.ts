@@ -189,13 +189,65 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
 
   app.use(express.json());
 
-  // Create a variable to store the QR code
-  let latestQrCode: string | null = null;
+  // CRITICAL: Track server start time - helps with troubleshooting
+  const serverStartTime = new Date();
 
-  // Add server status tracking
-  let whatsappInitializing = true;
-  let whatsappError: Error | null = null;
-  let clientReady = false;
+  // Set up minimal state management for diagnostics
+  const state = {
+    whatsappInitializing: false,
+    whatsappInitStarted: false,
+    whatsappError: null as Error | null,
+    clientReady: false,
+    latestQrCode: null as string | null,
+    environment: {
+      node: process.version,
+      platform: process.platform,
+      port: port || process.env.PORT || 3000,
+      pid: process.pid,
+      uptime: () => Math.floor((new Date().getTime() - serverStartTime.getTime()) / 1000),
+    },
+  };
+
+  // Log important startup information
+  logger.info(
+    `[WA] Server starting with Node ${state.environment.node} on ${state.environment.platform}`,
+  );
+  logger.info(`[WA] Process ID: ${state.environment.pid}`);
+  logger.info(`[WA] Port: ${state.environment.port}`);
+  logger.info(`[WA] Start time: ${serverStartTime.toISOString()}`);
+
+  // EMERGENCY DIAGNOSTIC endpoint - absolutely minimal, will help diagnose deployment issues
+  app.get('/', (_req, res) => {
+    res.status(200).send(`
+      <html>
+        <head><title>WhatsApp API Service</title></head>
+        <body>
+          <h1>WhatsApp API Service</h1>
+          <p>Server is running</p>
+          <p>Uptime: ${state.environment.uptime()} seconds</p>
+          <p>Started: ${serverStartTime.toISOString()}</p>
+          <p>Node: ${state.environment.node}</p>
+          <p>Platform: ${state.environment.platform}</p>
+          <p>WhatsApp Status: ${
+            state.whatsappInitStarted
+              ? state.clientReady
+                ? 'Ready'
+                : state.whatsappError
+                  ? 'Error'
+                  : 'Initializing'
+              : 'Not started'
+          }</p>
+          <ul>
+            <li><a href="/health">Health Check</a></li>
+            <li><a href="/memory-usage">Memory Usage</a></li>
+            <li><a href="/container-env">Container Environment</a></li>
+            <li><a href="/filesys">File System Check</a></li>
+            <li><a href="/qr">QR Code</a> (if available)</li>
+          </ul>
+        </body>
+      </html>
+    `);
+  });
 
   // Add health check endpoint that doesn't require authentication
   // CRITICAL: This must be minimal and not depend on any WhatsApp state
@@ -205,7 +257,16 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       res.status(200).json({
         status: 'ok',
         server: 'running',
-        whatsapp: clientReady ? 'ready' : whatsappError ? 'error' : 'initializing',
+        uptime: state.environment.uptime(),
+        startTime: serverStartTime.toISOString(),
+        whatsappStarted: state.whatsappInitStarted,
+        whatsapp: state.clientReady
+          ? 'ready'
+          : state.whatsappError
+            ? 'error'
+            : state.whatsappInitializing
+              ? 'initializing'
+              : 'not_started',
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -242,8 +303,9 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
                   <div class="qr-container">
                     <pre>${qrCode}</pre>
                   </div>
-                  <p class="status">Server status: ${whatsappInitializing ? 'Initializing WhatsApp...' : clientReady ? 'WhatsApp Ready' : 'Waiting for authentication'}</p>
+                  <p class="status">Server status: ${state.whatsappInitializing ? 'Initializing WhatsApp...' : state.clientReady ? 'WhatsApp Ready' : 'Waiting for authentication'}</p>
                   <p><small>Last updated: ${new Date().toISOString()}</small></p>
+                  <p><a href="/">Back to Home</a></p>
                 </body>
               </html>
             `);
@@ -258,10 +320,10 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       }
 
       // Fallback to in-memory QR code
-      if (latestQrCode) {
+      if (state.latestQrCode) {
         try {
           res.type('text/plain');
-          return res.send(latestQrCode);
+          return res.send(state.latestQrCode);
         } catch (error) {
           logger.error('[WA] Error sending QR code as text:', error);
           // Continue to final fallback
@@ -269,14 +331,20 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       }
 
       // Final fallback - just return status
-      if (whatsappError) {
-        return res.status(500).send(`WhatsApp initialization error: ${whatsappError.message}`);
-      } else if (whatsappInitializing) {
+      if (state.whatsappError) {
+        return res
+          .status(500)
+          .send(`WhatsApp initialization error: ${state.whatsappError.message}`);
+      } else if (state.whatsappInitializing) {
         return res
           .status(202)
           .send('WhatsApp client is still initializing. Please try again in a minute.');
-      } else if (clientReady) {
+      } else if (state.clientReady) {
         return res.status(200).send('WhatsApp client is already authenticated. No QR code needed.');
+      } else if (!state.whatsappInitStarted) {
+        return res
+          .status(200)
+          .send('WhatsApp initialization has not been started yet. Check server logs.');
       } else {
         return res.status(404).send('QR code not yet available. Please try again in a moment.');
       }
@@ -291,8 +359,17 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
     try {
       res.status(200).json({
         server: 'running',
-        whatsapp: clientReady ? 'ready' : whatsappError ? 'error' : 'initializing',
-        error: whatsappError ? whatsappError.message : null,
+        uptime: state.environment.uptime(),
+        startTime: serverStartTime.toISOString(),
+        whatsappStarted: state.whatsappInitStarted,
+        whatsapp: state.clientReady
+          ? 'ready'
+          : state.whatsappError
+            ? 'error'
+            : state.whatsappInitializing
+              ? 'initializing'
+              : 'not_started',
+        error: state.whatsappError ? state.whatsappError.message : null,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -427,74 +504,38 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
     }
   });
 
+  // Add start WhatsApp endpoint - separated from server start
+  app.get('/start-whatsapp', (_req, res) => {
+    // Only start once
+    if (state.whatsappInitStarted) {
+      return res.status(200).json({
+        status: 'WhatsApp initialization already started',
+        clientReady: state.clientReady,
+        error: state.whatsappError ? state.whatsappError.message : null,
+      });
+    }
+
+    // Start WhatsApp initialization
+    state.whatsappInitStarted = true;
+    state.whatsappInitializing = true;
+
+    // Launch initialization in the background
+    initializeWhatsAppClient(whatsAppConfig, state);
+
+    return res.status(200).json({
+      status: 'WhatsApp initialization started',
+      message: 'Check /status for updates',
+    });
+  });
+
   // Start server IMMEDIATELY - BEFORE client initialization
   // This is CRITICAL to prevent Render deployment failures
-  const serverPort = port || 3000;
+  const serverPort = port || parseInt(process.env.PORT || '') || 3000;
+  logger.info(`[WA] Starting HTTP server on port ${serverPort}`);
+
   const server = app.listen(serverPort, '0.0.0.0', () => {
     logger.info(`[WA] WhatsApp Web Client API server started on port ${serverPort}`);
   });
-
-  // Initialize WhatsApp client in the background
-  let client: Client | null = null;
-
-  const initializeClient = async () => {
-    try {
-      logger.info('[WA] Starting WhatsApp client initialization...');
-
-      // Create the client
-      client = createWhatsAppClient(whatsAppConfig);
-
-      // Capture the QR code
-      client.on('qr', qr => {
-        logger.info('[WA] New QR code received');
-        latestQrCode = qr;
-        // QR code file saving is handled in whatsapp-client.ts
-
-        // Also log QR code to console for terminal access
-        try {
-          // Use a smaller QR code with proper formatting
-          logger.info('[WA] Scan this QR code with your WhatsApp app:');
-          const qrcodeTerminal = require('qrcode-terminal');
-          qrcodeTerminal.generate(qr, { small: true }, function (qrcode: string) {
-            // Split the QR code by lines and log each line separately to preserve formatting
-            const qrLines = qrcode.split('\n');
-            qrLines.forEach((line: string) => {
-              logger.info(`[WA-QR] ${line}`);
-            });
-          });
-        } catch (error) {
-          logger.error('[WA] Failed to generate terminal QR code', error);
-        }
-      });
-
-      client.on('ready', () => {
-        clientReady = true;
-        whatsappInitializing = false;
-        logger.info('[WA] Client is ready');
-      });
-
-      client.on('auth_failure', error => {
-        whatsappError = new Error(`Authentication failed: ${error}`);
-        logger.error('[WA] Authentication failed:', error);
-      });
-
-      client.on('disconnected', reason => {
-        logger.warn('[WA] Client disconnected:', reason);
-        clientReady = false;
-      });
-
-      await client.initialize();
-    } catch (error) {
-      whatsappInitializing = false;
-      whatsappError = error as Error;
-      logger.error('[WA] Error during client initialization:', error);
-
-      // Don't throw here - we want the server to keep running even if WhatsApp fails
-    }
-  };
-
-  // Start client initialization in the background
-  initializeClient();
 
   // Set additional error handlers for process
   process.on('uncaughtException', error => {
@@ -510,12 +551,67 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   // Keep the process running
   process.on('SIGINT', async () => {
     logger.info('[WA] Shutting down WhatsApp Web Client API...');
-    if (client) {
-      await client.destroy();
-    }
     server.close();
     process.exit(0);
   });
+}
+
+// Separate function to initialize WhatsApp client
+async function initializeWhatsAppClient(whatsAppConfig: WhatsAppConfig, state: any): Promise<void> {
+  let client: Client | null = null;
+
+  try {
+    logger.info('[WA] Starting WhatsApp client initialization...');
+
+    // Create the client
+    client = createWhatsAppClient(whatsAppConfig);
+
+    // Capture the QR code
+    client.on('qr', qr => {
+      logger.info('[WA] New QR code received');
+      state.latestQrCode = qr;
+      // QR code file saving is handled in whatsapp-client.ts
+
+      // Also log QR code to console for terminal access
+      try {
+        // Use a smaller QR code with proper formatting
+        logger.info('[WA] Scan this QR code with your WhatsApp app:');
+        const qrcodeTerminal = require('qrcode-terminal');
+        qrcodeTerminal.generate(qr, { small: true }, function (qrcode: string) {
+          // Split the QR code by lines and log each line separately to preserve formatting
+          const qrLines = qrcode.split('\n');
+          qrLines.forEach((line: string) => {
+            logger.info(`[WA-QR] ${line}`);
+          });
+        });
+      } catch (error) {
+        logger.error('[WA] Failed to generate terminal QR code', error);
+      }
+    });
+
+    client.on('ready', () => {
+      state.clientReady = true;
+      state.whatsappInitializing = false;
+      logger.info('[WA] Client is ready');
+    });
+
+    client.on('auth_failure', error => {
+      state.whatsappError = new Error(`Authentication failed: ${error}`);
+      logger.error('[WA] Authentication failed:', error);
+    });
+
+    client.on('disconnected', reason => {
+      logger.warn('[WA] Client disconnected:', reason);
+      state.clientReady = false;
+    });
+
+    await client.initialize();
+  } catch (error) {
+    state.whatsappInitializing = false;
+    state.whatsappError = error as Error;
+    logger.error('[WA] Error during client initialization:', error);
+    // Don't throw here - we want the server to keep running even if WhatsApp fails
+  }
 }
 
 async function startMcpServer(
