@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: whatsapp-integration
+    env: node
+    buildCommand: npm install
+    startCommand: npx ts-node --transpile-only src/minimal-server.ts
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+    plan: free
