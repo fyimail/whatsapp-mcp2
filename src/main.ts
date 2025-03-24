@@ -301,6 +301,132 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
     }
   });
 
+  // Add memory usage endpoint for troubleshooting
+  app.get('/memory-usage', (_req, res) => {
+    try {
+      const formatMemoryUsage = (data: number) =>
+        `${Math.round((data / 1024 / 1024) * 100) / 100} MB`;
+
+      const memoryData = process.memoryUsage();
+
+      const memoryUsage = {
+        rss: formatMemoryUsage(memoryData.rss),
+        heapTotal: formatMemoryUsage(memoryData.heapTotal),
+        heapUsed: formatMemoryUsage(memoryData.heapUsed),
+        external: formatMemoryUsage(memoryData.external),
+        arrayBuffers: formatMemoryUsage(memoryData.arrayBuffers || 0),
+        rawData: memoryData,
+        timestamp: new Date().toISOString(),
+      };
+
+      logger.info('[WA] Memory usage report:', memoryUsage);
+      res.status(200).json(memoryUsage);
+    } catch (error) {
+      logger.error('[WA] Error in memory-usage endpoint:', error);
+      res.status(500).send('Error getting memory usage');
+    }
+  });
+
+  // Add environment variables endpoint for troubleshooting
+  app.get('/container-env', (_req, res) => {
+    try {
+      // Don't log or expose sensitive values
+      const sanitizedEnv = Object.fromEntries(
+        Object.entries(process.env)
+          .filter(
+            ([key]) =>
+              !key.toLowerCase().includes('key') &&
+              !key.toLowerCase().includes('token') &&
+              !key.toLowerCase().includes('secret') &&
+              !key.toLowerCase().includes('pass') &&
+              !key.toLowerCase().includes('auth'),
+          )
+          .map(([key, value]) => [key, value]),
+      );
+
+      const envData = {
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        containerVars: {
+          PORT: process.env.PORT,
+          NODE_ENV: process.env.NODE_ENV,
+          DOCKER_CONTAINER: process.env.DOCKER_CONTAINER,
+          RENDER: process.env.RENDER,
+        },
+        // Include sanitized env for debugging only
+        fullEnv: sanitizedEnv,
+        timestamp: new Date().toISOString(),
+      };
+
+      logger.info('[WA] Container environment report');
+      res.status(200).json(envData);
+    } catch (error) {
+      logger.error('[WA] Error in container-env endpoint:', error);
+      res.status(500).send('Error getting container environment');
+    }
+  });
+
+  // Add file system exploration endpoint for troubleshooting
+  app.get('/filesys', (_req, res) => {
+    try {
+      const directoriesToCheck = [
+        '/',
+        '/app',
+        '/app/data',
+        '/app/data/whatsapp',
+        '/var',
+        '/var/data',
+        '/var/data/whatsapp',
+        '/tmp',
+        '/tmp/puppeteer_data',
+      ];
+
+      const fsData = directoriesToCheck.map(dir => {
+        try {
+          const exists = fs.existsSync(dir);
+          let files = [];
+          let stats = null;
+
+          if (exists) {
+            try {
+              stats = fs.statSync(dir);
+              files = fs.readdirSync(dir).slice(0, 20); // Only get first 20 files
+            } catch (e) {
+              files = [`Error reading directory: ${e.message}`];
+            }
+          }
+
+          return {
+            directory: dir,
+            exists,
+            stats: stats
+              ? {
+                  isDirectory: stats.isDirectory(),
+                  size: stats.size,
+                  mode: stats.mode,
+                  uid: stats.uid,
+                  gid: stats.gid,
+                }
+              : null,
+            files,
+          };
+        } catch (e) {
+          return {
+            directory: dir,
+            error: e.message,
+          };
+        }
+      });
+
+      logger.info('[WA] File system exploration report');
+      res.status(200).json(fsData);
+    } catch (error) {
+      logger.error('[WA] Error in filesys endpoint:', error);
+      res.status(500).send('Error exploring file system');
+    }
+  });
+
   // Start server IMMEDIATELY - BEFORE client initialization
   // This is CRITICAL to prevent Render deployment failures
   const serverPort = port || 3000;
