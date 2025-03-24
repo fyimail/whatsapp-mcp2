@@ -119,13 +119,13 @@ async function startMcpSseServer(
 
   let transport: SSEServerTransport;
 
-  app.get('/sse', async (_req, res) => {
+  app.get('/sse', async (_req: Request, res: Response) => {
     logger.info('Received SSE connection');
     transport = new SSEServerTransport('/message', res);
     await server.connect(transport);
   });
 
-  app.post('/message', async (req, res) => {
+  app.post('/message', async (req: Request, res: Response) => {
     await transport?.handlePostMessage(req, res);
   });
 
@@ -178,7 +178,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   const app = express();
 
   // Add error handling to all middleware
-  app.use((req, res, next) => {
+  app.use((req: Request, res: Response, next: NextFunction) => {
     try {
       requestLogger(req, res, next);
     } catch (error) {
@@ -217,7 +217,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   logger.info(`[WA] Start time: ${serverStartTime.toISOString()}`);
 
   // EMERGENCY DIAGNOSTIC endpoint - absolutely minimal, will help diagnose deployment issues
-  app.get('/', (_req, res) => {
+  app.get('/', (_req: Request, res: Response) => {
     res.status(200).send(`
       <html>
         <head><title>WhatsApp API Service</title></head>
@@ -251,7 +251,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
 
   // Add health check endpoint that doesn't require authentication
   // CRITICAL: This must be minimal and not depend on any WhatsApp state
-  app.get('/health', (_req, res) => {
+  app.get('/health', (_req: Request, res: Response) => {
     try {
       // Always return 200 for Render health check, even if WhatsApp is still initializing
       res.status(200).json({
@@ -275,9 +275,41 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       res.status(200).send('OK');
     }
   });
+  
+  // Add /wa-api endpoint for backwards compatibility with previous implementation
+  app.get('/wa-api', (_req: Request, res: Response) => {
+    try {
+      // Get the API key from the same place as the official implementation
+      const apiKeyPath = path.join(whatsAppConfig.authDir || '.wwebjs_auth', 'api_key.txt');
+      
+      if (fs.existsSync(apiKeyPath)) {
+        const apiKey = fs.readFileSync(apiKeyPath, 'utf8');
+        logger.info('[WA] API key retrieved for /wa-api endpoint');
+        
+        res.status(200).json({
+          status: 'success',
+          message: 'WhatsApp API key',
+          apiKey: apiKey
+        });
+      } else {
+        logger.warn('[WA] API key file not found for /wa-api endpoint');
+        res.status(404).json({
+          status: 'error',
+          message: 'API key not found. Service might still be initializing.'
+        });
+      }
+    } catch (error) {
+      logger.error('[WA] Error retrieving API key for /wa-api endpoint:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to retrieve API key',
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
 
   // Add QR code endpoint with enhanced error handling
-  app.get('/qr', (req, res) => {
+  app.get('/qr', (_req: Request, res: Response) => {
     try {
       // First try to get QR from file
       try {
@@ -355,7 +387,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   });
 
   // Add status endpoint with enhanced error handling
-  app.get('/status', (_req, res) => {
+  app.get('/status', (_req: Request, res: Response) => {
     try {
       res.status(200).json({
         server: 'running',
@@ -379,7 +411,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   });
 
   // Add memory usage endpoint for troubleshooting
-  app.get('/memory-usage', (_req, res) => {
+  app.get('/memory-usage', (_req: Request, res: Response) => {
     try {
       const formatMemoryUsage = (data: number) =>
         `${Math.round((data / 1024 / 1024) * 100) / 100} MB`;
@@ -405,7 +437,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   });
 
   // Add environment variables endpoint for troubleshooting
-  app.get('/container-env', (_req, res) => {
+  app.get('/container-env', (_req: Request, res: Response) => {
     try {
       // Don't log or expose sensitive values
       const sanitizedEnv = Object.fromEntries(
@@ -445,7 +477,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   });
 
   // Add file system exploration endpoint for troubleshooting
-  app.get('/filesys', (_req, res) => {
+  app.get('/filesys', (_req: Request, res: Response) => {
     try {
       const directoriesToCheck = [
         '/',
@@ -462,7 +494,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       const fsData = directoriesToCheck.map(dir => {
         try {
           const exists = fs.existsSync(dir);
-          let files = [];
+          let files: string[] = [];
           let stats = null;
 
           if (exists) {
@@ -470,7 +502,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
               stats = fs.statSync(dir);
               files = fs.readdirSync(dir).slice(0, 20); // Only get first 20 files
             } catch (e) {
-              files = [`Error reading directory: ${e.message}`];
+              files = [`Error reading directory: ${e instanceof Error ? e.message : String(e)}`];
             }
           }
 
@@ -491,7 +523,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
         } catch (e) {
           return {
             directory: dir,
-            error: e.message,
+            error: e instanceof Error ? e.message : String(e),
           };
         }
       });
@@ -505,7 +537,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
   });
 
   // Add start WhatsApp endpoint - separated from server start
-  app.get('/start-whatsapp', (_req, res) => {
+  app.get('/start-whatsapp', (_req: Request, res: Response) => {
     // Only start once
     if (state.whatsappInitStarted) {
       return res.status(200).json({

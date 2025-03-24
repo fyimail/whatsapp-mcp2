@@ -2,10 +2,14 @@ services:
   - type: web
     name: whatsapp-integration
     env: node
-    buildCommand: npm install
-    startCommand: node src/server.js
+    buildCommand: npm install && npm run build:force
+    startCommand: node dist/main.js --mode whatsapp-api --api-port 3000 --auth-data-path /app/.wwebjs_auth --log-level info
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: 3000
+      - key: DOCKER_CONTAINER
+        value: "true"
     plan: free

@@ -7,8 +7,11 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:force": "tsc --skipLibCheck",
     "start": "node dist/main.js",
+    "start:render": "node dist/render-deploy.js",
     "dev": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/main.ts",
+    "dev:render": "ts-node render-deploy.ts",
     "watch": "tsc -w",
     "serve": "nodemon --watch dist/ dist/main.js",
     "test": "jest",
