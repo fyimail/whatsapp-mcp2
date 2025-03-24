@@ -4,7 +4,11 @@
 # Build the TypeScript code with type errors ignored
 npm run build:force
 
-# Run in WhatsApp API mode with settings that match our previous success
+# Kill any existing server instances
+pkill -f "node dist/main.js" || true
+
+# Run in WhatsApp API mode with settings that match our Render deployment
+# This ensures the Express server starts IMMEDIATELY and doesn't wait for WhatsApp initialization
 node dist/main.js \
   --mode whatsapp-api \
   --api-port 3000 \

@@ -199,6 +199,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
     whatsappError: null as Error | null,
     clientReady: false,
     latestQrCode: null as string | null,
+    client: null as any, // Will hold the WhatsApp client instance once initialized
     environment: {
       node: process.version,
       platform: process.platform,
@@ -275,27 +276,27 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       res.status(200).send('OK');
     }
   });
-  
+
   // Add /wa-api endpoint for backwards compatibility with previous implementation
   app.get('/wa-api', (_req: Request, res: Response) => {
     try {
       // Get the API key from the same place as the official implementation
       const apiKeyPath = path.join(whatsAppConfig.authDir || '.wwebjs_auth', 'api_key.txt');
-      
+
       if (fs.existsSync(apiKeyPath)) {
         const apiKey = fs.readFileSync(apiKeyPath, 'utf8');
         logger.info('[WA] API key retrieved for /wa-api endpoint');
-        
+
         res.status(200).json({
           status: 'success',
           message: 'WhatsApp API key',
-          apiKey: apiKey
+          apiKey: apiKey,
         });
       } else {
         logger.warn('[WA] API key file not found for /wa-api endpoint');
         res.status(404).json({
           status: 'error',
-          message: 'API key not found. Service might still be initializing.'
+          message: 'API key not found. Service might still be initializing.',
         });
       }
     } catch (error) {
@@ -303,7 +304,7 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
       res.status(500).json({
         status: 'error',
         message: 'Failed to retrieve API key',
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   });
@@ -433,6 +434,520 @@ async function startWhatsAppApiServer(whatsAppConfig: WhatsAppConfig, port: numb
     } catch (error) {
       logger.error('[WA] Error in memory-usage endpoint:', error);
       res.status(500).send('Error getting memory usage');
+    }
+  });
+
+  // API endpoint to get all chats (leverages the MCP get_chats tool)
+  app.get('/api/chats', async (_req: Request, res: Response) => {
+    try {
+      if (!state.clientReady) {
+        return res.status(503).json({
+          status: 'error',
+          message: 'WhatsApp client not ready',
+          whatsappStatus: state.clientReady ? 'ready' : state.whatsappError ? 'error' : 'initializing',
+        });
+      }
+
+      const whatsappClient = state.client;
+      if (!whatsappClient) {
+        return res.status(500).json({
+          status: 'error',
+          message: 'WhatsApp client not available',
+        });
+      }
+
+      logger.info('[WA] Getting all chats');
+      const chats = await whatsappClient.getChats();
+      
+      // Format the chats in a more API-friendly format
+      const formattedChats = chats.map(chat => ({
+        id: chat.id._serialized,
+        name: chat.name,
+        isGroup: chat.isGroup,
+        timestamp: chat.timestamp ? new Date(chat.timestamp * 1000).toISOString() : null,
+        unreadCount: chat.unreadCount,
+      }));
+
+      res.status(200).json({
+        status: 'success',
+        chats: formattedChats,
+      });
+    } catch (error) {
+      logger.error('[WA] Error getting chats:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get chats',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // API endpoint to get messages from a specific chat
+  app.get('/api/chats/:chatId/messages', async (req: Request, res: Response) => {
+    try {
+      const { chatId } = req.params;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+
+      if (!state.clientReady) {
+        return res.status(503).json({
+          status: 'error',
+          message: 'WhatsApp client not ready',
+          whatsappStatus: state.clientReady ? 'ready' : state.whatsappError ? 'error' : 'initializing',
+        });
+      }
+
+      const whatsappClient = state.client;
+      if (!whatsappClient) {
+        return res.status(500).json({
+          status: 'error',
+          message: 'WhatsApp client not available',
+        });
+      }
+
+      logger.info(`[WA] Getting messages for chat ${chatId} (limit: ${limit})`);
+      
+      // Get the chat by ID
+      const chat = await whatsappClient.getChatById(chatId);
+      if (!chat) {
+        return res.status(404).json({
+          status: 'error',
+          message: `Chat with ID ${chatId} not found`,
+        });
+      }
+
+      // Fetch messages
+      const messages = await chat.fetchMessages({ limit });
+      
+      // Format messages in a more API-friendly format
+      const formattedMessages = messages.map(msg => ({
+        id: msg.id._serialized,
+        body: msg.body,
+        type: msg.type,
+        timestamp: msg.timestamp ? new Date(msg.timestamp * 1000).toISOString() : null,
+        from: msg.from,
+        fromMe: msg.fromMe,
+        hasMedia: msg.hasMedia,
+      }));
+
+      res.status(200).json({
+        status: 'success',
+        chatId: chatId,
+        messages: formattedMessages,
+      });
+    } catch (error) {
+      logger.error(`[WA] Error getting messages for chat:`, error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get messages',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // ===================================================
+  // REST API ENDPOINTS THAT MAP TO ALL MCP TOOLS
+  // ===================================================
+
+  // Utility function to check if WhatsApp client is ready
+  const ensureClientReady = (res: Response) => {
+    if (!state.clientReady) {
+      res.status(503).json({
+        status: 'error',
+        message: 'WhatsApp client not ready',
+        whatsappStatus: state.clientReady ? 'ready' : state.whatsappError ? 'error' : 'initializing',
+      });
+      return false;
+    }
+    return true;
+  };
+
+  // 1. GET STATUS ENDPOINT - Maps to get_status tool
+  app.get('/api/status', (_req: Request, res: Response) => {
+    try {
+      const whatsappStatus = state.clientReady 
+        ? 'ready' 
+        : state.whatsappError 
+          ? 'error' 
+          : state.whatsappInitializing 
+            ? 'initializing' 
+            : 'not_started';
+      
+      res.status(200).json({
+        status: 'success',
+        whatsappStatus: whatsappStatus,
+        uptime: state.environment.uptime(),
+        startTime: serverStartTime.toISOString(),
+        error: state.whatsappError ? state.whatsappError.message : null,
+      });
+    } catch (error) {
+      logger.error('[WA] Error in status endpoint:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get status',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 2. SEARCH CONTACTS ENDPOINT - Maps to search_contacts tool
+  app.get('/api/contacts/search', async (req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const query = req.query.query as string;
+      if (!query) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Missing query parameter',
+        });
+      }
+
+      const whatsappClient = state.client;
+      const contacts = await whatsappClient.getContacts();
+      const filtered = contacts.filter(contact => {
+        const name = contact.name || contact.pushname || '';
+        const number = contact.number || contact.id?.user || '';
+        return name.toLowerCase().includes(query.toLowerCase()) || number.includes(query);
+      }).map(contact => ({
+        id: contact.id._serialized,
+        name: contact.name || contact.pushname || 'Unknown',
+        number: contact.number || contact.id?.user || 'Unknown',
+        type: contact.isGroup ? 'group' : 'individual',
+      }));
+
+      res.status(200).json({
+        status: 'success',
+        query: query,
+        contacts: filtered,
+      });
+    } catch (error) {
+      logger.error('[WA] Error searching contacts:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to search contacts',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 3. GET MESSAGES ENDPOINT - Maps to get_messages tool
+  app.get('/api/chats/:chatId/messages', async (req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const { chatId } = req.params;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+
+      const whatsappClient = state.client;
+      
+      // Get the chat by ID
+      const chat = await whatsappClient.getChatById(chatId);
+      if (!chat) {
+        return res.status(404).json({
+          status: 'error',
+          message: `Chat with ID ${chatId} not found`,
+        });
+      }
+
+      // Fetch messages
+      const messages = await chat.fetchMessages({ limit });
+      
+      // Format messages in a more API-friendly format
+      const formattedMessages = messages.map(msg => ({
+        id: msg.id._serialized,
+        body: msg.body,
+        type: msg.type,
+        timestamp: msg.timestamp ? new Date(msg.timestamp * 1000).toISOString() : null,
+        from: msg.from,
+        fromMe: msg.fromMe,
+        hasMedia: msg.hasMedia,
+      }));
+
+      res.status(200).json({
+        status: 'success',
+        chatId: chatId,
+        messages: formattedMessages,
+      });
+    } catch (error) {
+      logger.error(`[WA] Error getting messages for chat:`, error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get messages',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 4. GET CHATS ENDPOINT - Maps to get_chats tool
+  app.get('/api/chats', async (_req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const whatsappClient = state.client;
+      const chats = await whatsappClient.getChats();
+      
+      // Format the chats in a more API-friendly format
+      const formattedChats = chats.map(chat => ({
+        id: chat.id._serialized,
+        name: chat.name,
+        isGroup: chat.isGroup,
+        timestamp: chat.timestamp ? new Date(chat.timestamp * 1000).toISOString() : null,
+        unreadCount: chat.unreadCount,
+      }));
+
+      res.status(200).json({
+        status: 'success',
+        chats: formattedChats,
+      });
+    } catch (error) {
+      logger.error('[WA] Error getting chats:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get chats',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 5. SEND MESSAGE ENDPOINT - Maps to send_message tool
+  app.post('/api/chats/:chatId/messages', async (req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const { chatId } = req.params;
+      const { message } = req.body;
+
+      if (!message) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Missing message in request body',
+        });
+      }
+
+      const whatsappClient = state.client;
+      
+      // Get the chat by ID
+      const chat = await whatsappClient.getChatById(chatId);
+      if (!chat) {
+        return res.status(404).json({
+          status: 'error',
+          message: `Chat with ID ${chatId} not found`,
+        });
+      }
+
+      // Send the message
+      const sentMessage = await chat.sendMessage(message);
+      
+      res.status(200).json({
+        status: 'success',
+        chatId: chatId,
+        messageId: sentMessage.id._serialized,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error(`[WA] Error sending message to chat:`, error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to send message',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 6. GET GROUPS ENDPOINT - Maps to groups resource
+  app.get('/api/groups', async (_req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const whatsappClient = state.client;
+      const chats = await whatsappClient.getChats();
+      const groups = chats.filter(chat => chat.isGroup).map(group => ({
+        id: group.id._serialized,
+        name: group.name,
+        participants: group.participants?.map(p => ({
+          id: p.id._serialized,
+          isAdmin: p.isAdmin || false,
+        })) || [],
+        timestamp: group.timestamp ? new Date(group.timestamp * 1000).toISOString() : null,
+      }));
+
+      res.status(200).json({
+        status: 'success',
+        groups: groups,
+      });
+    } catch (error) {
+      logger.error('[WA] Error getting groups:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get groups',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 7. SEARCH GROUPS ENDPOINT - Maps to search_groups resource
+  app.get('/api/groups/search', async (req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const query = req.query.query as string;
+      if (!query) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Missing query parameter',
+        });
+      }
+
+      const whatsappClient = state.client;
+      const chats = await whatsappClient.getChats();
+      const groups = chats.filter(chat => {
+        return chat.isGroup && chat.name.toLowerCase().includes(query.toLowerCase());
+      }).map(group => ({
+        id: group.id._serialized,
+        name: group.name,
+        participants: group.participants?.length || 0,
+        timestamp: group.timestamp ? new Date(group.timestamp * 1000).toISOString() : null,
+      }));
+
+      res.status(200).json({
+        status: 'success',
+        query: query,
+        groups: groups,
+      });
+    } catch (error) {
+      logger.error('[WA] Error searching groups:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to search groups',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 8. GET GROUP MESSAGES ENDPOINT - Maps to group_messages resource
+  app.get('/api/groups/:groupId/messages', async (req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const { groupId } = req.params;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+
+      const whatsappClient = state.client;
+      
+      // Get the group chat by ID
+      const chat = await whatsappClient.getChatById(groupId);
+      if (!chat || !chat.isGroup) {
+        return res.status(404).json({
+          status: 'error',
+          message: `Group with ID ${groupId} not found`,
+        });
+      }
+
+      // Fetch messages
+      const messages = await chat.fetchMessages({ limit });
+      
+      // Format messages
+      const formattedMessages = messages.map(msg => ({
+        id: msg.id._serialized,
+        body: msg.body,
+        type: msg.type,
+        timestamp: msg.timestamp ? new Date(msg.timestamp * 1000).toISOString() : null,
+        author: msg.author || msg.from,
+        fromMe: msg.fromMe,
+        hasMedia: msg.hasMedia,
+      }));
+
+      res.status(200).json({
+        status: 'success',
+        groupId: groupId,
+        messages: formattedMessages,
+      });
+    } catch (error) {
+      logger.error(`[WA] Error getting messages for group:`, error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get group messages',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 9. CREATE GROUP ENDPOINT - Maps to create_group tool
+  app.post('/api/groups', async (req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const { name, participants } = req.body;
+
+      if (!name || !participants || !Array.isArray(participants)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Missing name or participants array in request body',
+        });
+      }
+
+      const whatsappClient = state.client;
+      const result = await whatsappClient.createGroup(name, participants);
+
+      res.status(200).json({
+        status: 'success',
+        group: {
+          id: result.gid._serialized,
+          name: name,
+          participants: participants,
+        },
+      });
+    } catch (error) {
+      logger.error('[WA] Error creating group:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to create group',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 10. ADD PARTICIPANTS TO GROUP ENDPOINT - Maps to add_participants_to_group tool
+  app.post('/api/groups/:groupId/participants', async (req: Request, res: Response) => {
+    try {
+      if (!ensureClientReady(res)) return;
+
+      const { groupId } = req.params;
+      const { participants } = req.body;
+
+      if (!participants || !Array.isArray(participants)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Missing participants array in request body',
+        });
+      }
+
+      const whatsappClient = state.client;
+      
+      // Get the group chat by ID
+      const chat = await whatsappClient.getChatById(groupId);
+      if (!chat || !chat.isGroup) {
+        return res.status(404).json({
+          status: 'error',
+          message: `Group with ID ${groupId} not found`,
+        });
+      }
+
+      // Add participants
+      const result = await chat.addParticipants(participants);
+
+      res.status(200).json({
+        status: 'success',
+        groupId: groupId,
+        added: result,
+      });
+    } catch (error) {
+      logger.error(`[WA] Error adding participants to group:`, error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to add participants to group',
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   });
 
