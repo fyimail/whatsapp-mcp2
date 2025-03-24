@@ -40,7 +40,10 @@ const filterLogs = winston.format((info: winston.Logform.TransformableInfo) => {
   // Filter out frequent or noisy logs
   if (
     typeof info.message === 'string' &&
-    (info.message.includes('puppeteer') ||
+    (info.message.includes('puppeteer:protocol') ||
+      info.message.includes('Network.') ||
+      info.message.includes('sessionId') ||
+      info.message.includes('puppeteer') ||
       info.message.includes('browser') ||
       info.message.includes('checking') ||
       info.message.includes('polling'))
