@@ -3,7 +3,7 @@ services:
     name: whatsapp-integration
     env: node
     buildCommand: npm install
-    startCommand: node server.js
+    startCommand: node src/server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV

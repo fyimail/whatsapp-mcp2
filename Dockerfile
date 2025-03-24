@@ -42,5 +42,6 @@ EXPOSE 3000
 
 # Use our standalone pure Node.js HTTP server with zero dependencies
 # Extremely minimal server to ensure Render deployment works
-COPY server.js /app/server.js
-CMD ["node", "server.js"]
+# This ensures the server starts IMMEDIATELY for Render port detection
+# The server is now correctly located in the src directory
+CMD ["node", "--trace-warnings", "src/server.js"]
