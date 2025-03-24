@@ -42,4 +42,4 @@ EXPOSE 3000
 
 # Start command using ts-node with --transpile-only to skip type checking
 # Use $PORT environment variable which Render provides, falling back to 3000
-CMD ["sh", "-c", "npx ts-node --transpile-only src/main.ts --mode whatsapp-api --auth-dir /var/data/whatsapp --auth-strategy local --api-port ${PORT:-3000} --api-key 09d3e482988c47ae0daf3185c44faa20b5b9851412fc2fa54d910a689437f27b"]
+CMD ["sh", "-c", "npx ts-node --transpile-only src/minimal-server.ts"]
