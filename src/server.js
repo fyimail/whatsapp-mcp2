@@ -5,6 +5,15 @@ const url = require('url');
 // Import WhatsApp integration (but don't wait for it)
 const whatsapp = require('./whatsapp-integration');
 
+// Direct reference to the WhatsApp client for MCP-compatible endpoints
+let whatsappClient = null;
+
+// Set the WhatsApp client reference when it's ready
+whatsapp.onClientReady((client) => {
+  console.log('[Server] WhatsApp client reference received');
+  whatsappClient = client;
+});
+
 // Start logging immediately
 console.log(`[STARTUP] Starting HTTP server with WhatsApp integration`);
 console.log(`[STARTUP] Node version: ${process.version}`);
@@ -105,7 +114,7 @@ const server = http.createServer((req, res) => {
   }
 
   // API Key endpoint - simple way to get the current API key
-  if (url === '/api' || url === '/api/') {
+  if (url === '/wa-api' || url === '/wa-api/') {
     const status = whatsapp.getStatus();
     if (status.status === 'ready' && status.apiKey) {
       res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -138,7 +147,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // MCP Tool specific endpoint - status check with API key
+  // MCP Tool specific endpoint - status check with API key (required by wweb-mcp)
   if (url === '/api/status' || url.startsWith('/api/status?')) {
     const status = whatsapp.getStatus();
     const clientApiKey = status.apiKey;
@@ -172,6 +181,188 @@ const server = http.createServer((req, res) => {
       error: status.error,
       timestamp: new Date().toISOString()
     }));
+    return;
+  }
+
+  // MCP Tool endpoint - get all chats (required by wweb-mcp)
+  if (url === '/api/chats' || url.startsWith('/api/chats?')) {
+    const status = whatsapp.getStatus();
+    const clientApiKey = status.apiKey;
+    
+    // Only validate API key if client is ready and has an API key
+    if (status.status === 'ready' && clientApiKey) {
+      // Extract API key from request (if any)
+      const urlParams = new URL('http://dummy.com' + req.url).searchParams;
+      const requestApiKey = urlParams.get('api_key') || urlParams.get('apiKey');
+      const headerApiKey = req.headers['x-api-key'] || req.headers['authorization'];
+      const providedApiKey = requestApiKey || (headerApiKey && headerApiKey.replace('Bearer ', ''));
+      
+      // Validate API key if provided
+      if (providedApiKey && providedApiKey !== clientApiKey) {
+        console.log(`[${new Date().toISOString()}] Invalid API key for /api/chats endpoint`);
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid API key' }));
+        return;
+      }
+    }
+    
+    // Handle case where WhatsApp is not ready
+    if (status.status !== 'ready') {
+      console.log(`[${new Date().toISOString()}] /api/chats called but WhatsApp is not ready. Status: ${status.status}`);
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: `WhatsApp not ready. Current status: ${status.status}`,
+        status: status.status
+      }));
+      return;
+    }
+    
+    // Forward the request to the wweb-mcp library
+    console.log(`[${new Date().toISOString()}] MCP get_chats request forwarded to WhatsApp client`);
+    
+    // Using whatsapp-web.js getChats() function
+    try {
+      whatsappClient.getChats().then(chats => {
+        // Transform the chats to the format expected by the MCP tool
+        const formattedChats = chats.map(chat => ({
+          id: chat.id._serialized,
+          name: chat.name || '',
+          isGroup: chat.isGroup,
+          timestamp: chat.timestamp ? new Date(chat.timestamp * 1000).toISOString() : null,
+          unreadCount: chat.unreadCount || 0
+        }));
+        
+        res.writeHead(200, { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({
+          success: true,
+          chats: formattedChats
+        }));
+      }).catch(err => {
+        console.error(`[${new Date().toISOString()}] Error getting chats:`, err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: err.message
+        }));
+      });
+    } catch (err) {
+      console.error(`[${new Date().toISOString()}] Exception getting chats:`, err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: err.message
+      }));
+    }
+    return;
+  }
+  
+  // MCP Tool endpoint - get messages from a specific chat
+  if (url.startsWith('/api/messages/')) {
+    const status = whatsapp.getStatus();
+    const clientApiKey = status.apiKey;
+    
+    // Only validate API key if client is ready and has an API key
+    if (status.status === 'ready' && clientApiKey) {
+      // Extract API key from request (if any)
+      const urlParams = new URL('http://dummy.com' + req.url).searchParams;
+      const requestApiKey = urlParams.get('api_key') || urlParams.get('apiKey');
+      const headerApiKey = req.headers['x-api-key'] || req.headers['authorization'];
+      const providedApiKey = requestApiKey || (headerApiKey && headerApiKey.replace('Bearer ', ''));
+      
+      // Validate API key if provided
+      if (providedApiKey && providedApiKey !== clientApiKey) {
+        console.log(`[${new Date().toISOString()}] Invalid API key for /api/messages endpoint`);
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid API key' }));
+        return;
+      }
+    }
+    
+    // Handle case where WhatsApp is not ready
+    if (status.status !== 'ready') {
+      console.log(`[${new Date().toISOString()}] /api/messages called but WhatsApp is not ready. Status: ${status.status}`);
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: `WhatsApp not ready. Current status: ${status.status}`,
+        status: status.status
+      }));
+      return;
+    }
+    
+    // Extract chat ID from URL
+    const pathParts = url.split('?')[0].split('/');
+    const chatId = pathParts[3]; // /api/messages/{chatId}
+    
+    if (!chatId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: 'Missing chat ID in URL'
+      }));
+      return;
+    }
+
+    // Get the limit from query params
+    const urlParams = new URL('http://dummy.com' + req.url).searchParams;
+    const limit = parseInt(urlParams.get('limit') || '20', 10);
+    
+    // Get messages for this chat
+    console.log(`[${new Date().toISOString()}] MCP get_messages request for chat ${chatId}`);
+    try {
+      // Format chat ID correctly for whatsapp-web.js
+      const formattedChatId = chatId.includes('@') ? chatId : `${chatId}@c.us`;
+      
+      // First get the chat object
+      whatsappClient.getChatById(formattedChatId).then(chat => {
+        // Then fetch messages
+        chat.fetchMessages({ limit }).then(messages => {
+          // Format the messages as required by the MCP tool
+          const formattedMessages = messages.map(msg => ({
+            id: msg.id._serialized,
+            body: msg.body || '',
+            timestamp: msg.timestamp ? new Date(msg.timestamp * 1000).toISOString() : null,
+            from: msg.from || '',
+            fromMe: msg.fromMe || false,
+            type: msg.type || 'chat'
+          }));
+          
+          res.writeHead(200, { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          });
+          res.end(JSON.stringify({
+            success: true,
+            messages: formattedMessages
+          }));
+        }).catch(err => {
+          console.error(`[${new Date().toISOString()}] Error fetching messages:`, err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: err.message
+          }));
+        });
+      }).catch(err => {
+        console.error(`[${new Date().toISOString()}] Error getting chat by ID:`, err);
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: `Chat not found: ${err.message}`
+        }));
+      });
+    } catch (err) {
+      console.error(`[${new Date().toISOString()}] Exception getting messages:`, err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: err.message
+      }));
+    }
     return;
   }
   

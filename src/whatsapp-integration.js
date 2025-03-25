@@ -46,6 +46,15 @@ async function initializeWhatsAppClient() {
       console.log(`[WhatsApp] API Key: ${apiKey}`);
       connectionStatus = 'ready';
       qrCodeData = null;
+      
+      // Notify all registered callbacks that the client is ready
+      clientReadyCallbacks.forEach(callback => {
+        try {
+          callback(whatsappClient);
+        } catch (error) {
+          console.error('[WhatsApp] Error in client ready callback', error);
+        }
+      });
     });
 
     whatsappClient.on('authenticated', () => {
@@ -89,6 +98,9 @@ function generateApiKey() {
     .substring(0, 64);
 }
 
+// Callback for when client is ready
+let clientReadyCallbacks = [];
+
 // Export functions and state for the HTTP server to use
 module.exports = {
   initializeWhatsAppClient,
@@ -97,6 +109,14 @@ module.exports = {
     error: initializationError,
     apiKey: connectionStatus === 'ready' ? apiKey : null
   }),
+  // Register a callback to get the WhatsApp client instance when it's ready
+  onClientReady: (callback) => {
+    clientReadyCallbacks.push(callback);
+    // If client is already ready, call the callback immediately
+    if (connectionStatus === 'ready' && whatsappClient) {
+      callback(whatsappClient);
+    }
+  },
   getQRCode: async () => {
     if (!qrCodeData) {
       return null;
