@@ -184,6 +184,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Debug endpoint for WhatsApp client state
+  if (url === '/api/debug') {
+    const status = whatsapp.getStatus();
+    const clientInfo = {
+      status: status.status,
+      connected: status.connected,
+      authenticated: status.authenticated || false,
+      clientExists: !!whatsappClient,
+      clientInfo: whatsappClient ? {
+        info: whatsappClient.info ? Object.keys(whatsappClient.info) : null,
+        hasChats: typeof whatsappClient.getChats === 'function',
+        hasContacts: typeof whatsappClient.getContacts === 'function'
+      } : null
+    };
+    
+    res.writeHead(200, { 
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify(clientInfo));
+    return;
+  }
+
   // MCP Tool endpoint - get all chats (required by wweb-mcp)
   if (url === '/api/chats' || url.startsWith('/api/chats?')) {
     const status = whatsapp.getStatus();
