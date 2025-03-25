@@ -221,9 +221,30 @@ const server = http.createServer((req, res) => {
     // Forward the request to the wweb-mcp library
     console.log(`[${new Date().toISOString()}] MCP get_chats request forwarded to WhatsApp client`);
     
-    // Using whatsapp-web.js getChats() function
+    // Check if WhatsApp client reference is valid
+    if (!whatsappClient) {
+      console.error(`[${new Date().toISOString()}] WhatsApp client reference is null or undefined`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: 'WhatsApp client not properly initialized'
+      }));
+      return;
+    }
+    
+    // Using whatsapp-web.js getChats() function with timeout
     try {
-      whatsappClient.getChats().then(chats => {
+      // Create a timeout promise that rejects after 15 seconds
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Request timed out after 15 seconds')), 15000);
+      });
+      
+      // Race between the actual request and the timeout
+      Promise.race([
+        whatsappClient.getChats(),
+        timeoutPromise
+      ]).then(chats => {
+        console.log(`[${new Date().toISOString()}] Successfully retrieved ${chats.length} chats`);
         // Transform the chats to the format expected by the MCP tool
         const formattedChats = chats.map(chat => ({
           id: chat.id._serialized,
