@@ -480,6 +480,149 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
+  // Add a test message endpoint to validate sending works
+  if (url === '/api/test-message') {
+    const status = whatsapp.getStatus();
+    
+    // Check if WhatsApp is ready
+    if (status.status !== 'ready') {
+      console.log(`[${new Date().toISOString()}] /api/test-message called but WhatsApp is not ready. Status: ${status.status}`);
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: `WhatsApp not ready. Current status: ${status.status}`,
+        status: status.status
+      }));
+      return;
+    }
+
+    // Send a test message to the specified number
+    const testNumber = '16505578984';
+    const testMessage = `Test message from WhatsApp API at ${new Date().toISOString()}`;
+    
+    console.log(`[${new Date().toISOString()}] Sending test message to ${testNumber}`);
+    
+    whatsapp.sendMessage(testNumber, testMessage)
+      .then(result => {
+        console.log(`[${new Date().toISOString()}] Test message sent successfully to ${testNumber}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: 'Test message sent successfully',
+          to: testNumber,
+          messageId: result.id ? result.id._serialized : 'sent',
+          content: testMessage
+        }));
+      })
+      .catch(err => {
+        console.error(`[${new Date().toISOString()}] Error sending test message:`, err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: err.message
+        }));
+      });
+    
+    return;
+  }
+
+  // Handle API message send endpoint POST /api/send
+  if (url === '/api/send' && req.method === 'POST') {
+    const status = whatsapp.getStatus();
+    const clientApiKey = status.apiKey;
+    
+    // Only validate API key if client is ready and has an API key
+    if (status.status === 'ready' && clientApiKey) {
+      // Extract API key from request (if any)
+      const headerApiKey = req.headers['x-api-key'] || req.headers['authorization'];
+      const providedApiKey = headerApiKey && headerApiKey.replace('Bearer ', '');
+      
+      // Validate API key if provided
+      if (!providedApiKey || providedApiKey !== clientApiKey) {
+        console.log(`[${new Date().toISOString()}] Invalid or missing API key for /api/send endpoint`);
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid or missing API key' }));
+        return;
+      }
+    } else {
+      // Handle case where WhatsApp is not ready
+      console.log(`[${new Date().toISOString()}] /api/send called but WhatsApp is not ready. Status: ${status.status}`);
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: `WhatsApp not ready. Current status: ${status.status}`,
+        status: status.status
+      }));
+      return;
+    }
+
+    // Get request body
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { to, message } = data;
+        
+        if (!to || !message) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'Missing required fields: to, message'
+          }));
+          return;
+        }
+
+        console.log(`[${new Date().toISOString()}] Sending message to ${to}`);
+        
+        try {
+          const result = await whatsapp.sendMessage(to, message);
+          console.log(`[${new Date().toISOString()}] Message sent successfully to ${to}`);
+          
+          res.writeHead(200, { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          });
+          res.end(JSON.stringify({
+            success: true,
+            messageId: result.id ? result.id._serialized : 'sent',
+            to: result.to || to
+          }));
+        } catch (err) {
+          console.error(`[${new Date().toISOString()}] Error sending message:`, err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: err.message
+          }));
+        }
+      } catch (err) {
+        console.error(`[${new Date().toISOString()}] Error parsing JSON:`, err);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Invalid JSON in request body'
+        }));
+      }
+    });
+    return;
+  }
+
+  // Handle preflight CORS requests
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
+      'Access-Control-Max-Age': '86400'
+    });
+    res.end();
+    return;
+  }
+
 process.on('uncaughtException', error => {
   console.error(`[${new Date().toISOString()}] Uncaught exception: ${error.message}`);
   console.error(error.stack);
