@@ -14,9 +14,16 @@ async function initializeWhatsAppClient() {
   console.log('[WhatsApp] Starting WhatsApp client initialization');
   
   try {
+    // Determine the proper auth path - use /app/.wwebjs_auth in production (Render),
+    // or a local path when running on the development machine
+    const isRunningOnRender = process.env.IS_RENDER || process.env.RENDER;
+    const authPath = isRunningOnRender ? '/app/.wwebjs_auth' : './wwebjs_auth';
+    
+    console.log(`[WhatsApp] Using auth path: ${authPath}`);
+    
     // Initialize the WhatsApp client
     whatsappClient = new Client({
-      authStrategy: new LocalAuth({ dataPath: '/app/.wwebjs_auth' }),
+      authStrategy: new LocalAuth({ dataPath: authPath }),
       puppeteer: {
         headless: true,
         args: [
